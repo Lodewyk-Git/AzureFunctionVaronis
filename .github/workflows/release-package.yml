@@ -39,7 +39,6 @@ jobs:
         with:
           dotnet-version: |
             8.0.x
-            9.0.x
 
       - name: Restore
         run: dotnet restore AzureFunctionVaronis.sln
@@ -49,7 +48,7 @@ jobs:
 
       - name: Build package
         shell: pwsh
-        run: ./scripts/Build-Package.ps1 -Configuration Release -SkipTests
+        run: ./scripts/Build-Package.ps1 -Configuration Release
 
       - name: Prepare release assets
         id: assets

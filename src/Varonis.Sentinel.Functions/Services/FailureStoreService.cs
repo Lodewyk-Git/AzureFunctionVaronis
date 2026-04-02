@@ -12,6 +12,7 @@ public sealed class FailureStoreService : IFailureStoreService
 {
     private readonly BlobContainerClient _containerClient;
     private readonly ILogger<FailureStoreService> _logger;
+    private volatile bool _containerEnsured;
 
     public FailureStoreService(
         BlobServiceClient blobServiceClient,
@@ -33,9 +34,9 @@ public sealed class FailureStoreService : IFailureStoreService
             return;
         }
 
-        await _containerClient.CreateIfNotExistsAsync(cancellationToken: cancellationToken);
+        await EnsureContainerAsync(cancellationToken);
 
-        var blobName = $"{DateTime.UtcNow:yyyy/MM/dd/HH/mm}/failed-{correlationId}.json";
+        var blobName = $"{DateTimeOffset.UtcNow:yyyy/MM/dd/HH/mm}/failed-{correlationId}.json";
         var blobClient = _containerClient.GetBlobClient(blobName);
 
         var payload = new
@@ -53,5 +54,12 @@ public sealed class FailureStoreService : IFailureStoreService
             cancellationToken);
 
         _logger.LogError(exception, "Saved failed batch with {AlertCount} alerts to blob {BlobName}.", alerts.Count, blobName);
+    }
+
+    private async Task EnsureContainerAsync(CancellationToken cancellationToken)
+    {
+        if (_containerEnsured) return;
+        await _containerClient.CreateIfNotExistsAsync(cancellationToken: cancellationToken);
+        _containerEnsured = true;
     }
 }

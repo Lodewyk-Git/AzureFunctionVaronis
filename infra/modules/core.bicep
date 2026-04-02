@@ -39,6 +39,13 @@ param enableDiagnostics bool = true
 @description('Key Vault Secrets User role definition ID.')
 param keyVaultSecretsUserRoleDefinitionId string = '4633458b-17de-408a-b874-0445c86b69e6'
 
+@description('Default network action for Key Vault. Set to Deny for production environments.')
+@allowed([
+  'Allow'
+  'Deny'
+])
+param keyVaultDefaultNetworkAction string = 'Deny'
+
 var normalizedPrefix = toLower(replace(namePrefix, '-', ''))
 var normalizedEnv = toLower(replace(environmentName, '-', ''))
 var uniqueSuffix = toLower(uniqueString(resourceGroup().id, environmentName, namePrefix))
@@ -168,7 +175,7 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
     softDeleteRetentionInDays: 90
     publicNetworkAccess: 'Enabled'
     networkAcls: {
-      defaultAction: 'Allow'
+      defaultAction: keyVaultDefaultNetworkAction
       bypass: 'AzureServices'
     }
   }
@@ -204,8 +211,12 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
           value: '~4'
         }
         {
-          name: 'AzureWebJobsStorage'
-          value: functionStorageConnection
+          name: 'AzureWebJobsStorage__accountName'
+          value: functionStorage.name
+        }
+        {
+          name: 'AzureWebJobsStorage__credential'
+          value: 'managedidentity'
         }
         {
           name: 'WEBSITE_CONTENTAZUREFILECONNECTIONSTRING'
@@ -269,6 +280,39 @@ resource keyVaultSecretsUserAssignment 'Microsoft.Authorization/roleAssignments@
   scope: keyVault
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', keyVaultSecretsUserRoleDefinitionId)
+    principalId: functionApp.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+// Storage Blob Data Owner — required for checkpoint and failure-store access via managed identity
+resource storageBlobDataOwnerAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(functionStorage.id, functionApp.name, 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b')
+  scope: functionStorage
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b')
+    principalId: functionApp.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+// Storage Queue Data Contributor — required by the Functions runtime for internal trigger management
+resource storageQueueDataContributorAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(functionStorage.id, functionApp.name, '974c5e8b-45b9-4653-ba55-5f855dd0fb88')
+  scope: functionStorage
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '974c5e8b-45b9-4653-ba55-5f855dd0fb88')
+    principalId: functionApp.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+// Storage Table Data Contributor — required by the Functions runtime for timer trigger state
+resource storageTableDataContributorAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(functionStorage.id, functionApp.name, '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3')
+  scope: functionStorage
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3')
     principalId: functionApp.identity.principalId
     principalType: 'ServicePrincipal'
   }

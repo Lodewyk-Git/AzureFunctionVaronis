@@ -13,6 +13,7 @@ public sealed class CheckpointService : ICheckpointService
     private readonly BlobContainerClient _containerClient;
     private readonly CheckpointOptions _options;
     private readonly ILogger<CheckpointService> _logger;
+    private volatile bool _containerEnsured;
 
     public CheckpointService(
         BlobServiceClient blobServiceClient,
@@ -26,7 +27,7 @@ public sealed class CheckpointService : ICheckpointService
 
     public async Task<DateTimeOffset> GetLastCheckpointUtcAsync(CancellationToken cancellationToken = default)
     {
-        await _containerClient.CreateIfNotExistsAsync(cancellationToken: cancellationToken);
+        await EnsureContainerAsync(cancellationToken);
 
         var blobClient = _containerClient.GetBlobClient(_options.BlobName);
         var exists = await blobClient.ExistsAsync(cancellationToken);
@@ -49,11 +50,18 @@ public sealed class CheckpointService : ICheckpointService
 
     public async Task SetLastCheckpointUtcAsync(DateTimeOffset checkpointUtc, CancellationToken cancellationToken = default)
     {
-        await _containerClient.CreateIfNotExistsAsync(cancellationToken: cancellationToken);
+        await EnsureContainerAsync(cancellationToken);
         var blobClient = _containerClient.GetBlobClient(_options.BlobName);
         var state = new CheckpointState { LastSuccessfulCheckpointUtc = checkpointUtc };
 
         await blobClient.UploadAsync(BinaryData.FromObjectAsJson(state, JsonDefaults.SerializerOptions), overwrite: true, cancellationToken);
         _logger.LogInformation("Checkpoint updated to {CheckpointUtc}.", checkpointUtc);
+    }
+
+    private async Task EnsureContainerAsync(CancellationToken cancellationToken)
+    {
+        if (_containerEnsured) return;
+        await _containerClient.CreateIfNotExistsAsync(cancellationToken: cancellationToken);
+        _containerEnsured = true;
     }
 }

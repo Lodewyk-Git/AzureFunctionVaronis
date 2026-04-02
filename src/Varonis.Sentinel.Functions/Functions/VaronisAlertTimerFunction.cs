@@ -66,7 +66,15 @@ public sealed class VaronisAlertTimerFunction
         }
         catch (Exception ex)
         {
-            await _failureStoreService.SaveFailedBatchAsync(alerts, ex, correlationId, cancellationToken);
+            try
+            {
+                await _failureStoreService.SaveFailedBatchAsync(alerts, ex, correlationId, CancellationToken.None);
+            }
+            catch (Exception storeEx)
+            {
+                _logger.LogError(storeEx, "Failed to persist failure batch to blob storage. CorrelationId={CorrelationId}.", correlationId);
+            }
+
             _logger.LogError(ex, "Varonis ingestion run failed. CorrelationId={CorrelationId}.", correlationId);
             throw;
         }

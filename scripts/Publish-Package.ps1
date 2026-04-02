@@ -42,27 +42,16 @@ if ([string]::IsNullOrWhiteSpace($PackageVersion)) {
 
 $blobName = [IO.Path]::GetFileName($PackagePath)
 
-$accountKey = az storage account keys list `
-    --resource-group $ResourceGroupName `
-    --account-name $PackageStorageAccountName `
-    --query "[0].value" `
-    --output tsv `
-    --only-show-errors
-
-if ([string]::IsNullOrWhiteSpace($accountKey)) {
-    throw "Failed to retrieve key for storage account $PackageStorageAccountName."
-}
-
 az storage container create `
     --account-name $PackageStorageAccountName `
-    --account-key $accountKey `
+    --auth-mode login `
     --name $PackageContainerName `
     --public-access off `
     --only-show-errors | Out-Null
 
 az storage blob upload `
     --account-name $PackageStorageAccountName `
-    --account-key $accountKey `
+    --auth-mode login `
     --container-name $PackageContainerName `
     --file $PackagePath `
     --name $blobName `
@@ -112,7 +101,8 @@ if ($DeploymentMode -eq "ZipDeploy") {
 $expiryUtc = (Get-Date).ToUniversalTime().AddHours($SasExpiryHours).ToString("yyyy-MM-ddTHH:mmZ")
 $sasToken = az storage blob generate-sas `
     --account-name $PackageStorageAccountName `
-    --account-key $accountKey `
+    --auth-mode login `
+    --as-user `
     --container-name $PackageContainerName `
     --name $blobName `
     --permissions r `

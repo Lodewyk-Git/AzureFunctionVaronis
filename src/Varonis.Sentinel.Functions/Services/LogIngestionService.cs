@@ -3,7 +3,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Varonis.Sentinel.Functions.Models;
 using Varonis.Sentinel.Functions.Options;
-using Varonis.Sentinel.Functions.Utilities;
 
 namespace Varonis.Sentinel.Functions.Services;
 
@@ -32,11 +31,10 @@ public sealed class LogIngestionService : ILogIngestionService
 
         foreach (var batch in alerts.Chunk(_ingestionOptions.MaxRecordsPerUpload))
         {
-            var binaryData = BinaryData.FromObjectAsJson(batch, JsonDefaults.SerializerOptions);
             await _logsIngestionClient.UploadAsync(
                 _ingestionOptions.DcrImmutableId,
                 _ingestionOptions.StreamName,
-                new[] { binaryData },
+                batch,
                 cancellationToken: cancellationToken);
 
             _logger.LogInformation(

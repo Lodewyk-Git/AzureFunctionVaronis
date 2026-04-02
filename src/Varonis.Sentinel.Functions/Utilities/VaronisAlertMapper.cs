@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Varonis.Sentinel.Functions.Models;
 
@@ -27,7 +29,7 @@ public static class VaronisAlertMapper
             yield return new VaronisAlert
             {
                 TimeGenerated = alertTime,
-                AlertId = GetFirstValue(raw, "alertId", "id", "eventId") ?? Guid.NewGuid().ToString("N"),
+                AlertId = GetFirstValue(raw, "alertId", "id", "eventId") ?? GenerateDeterministicId(raw),
                 AlertTimeUtc = alertTime,
                 Severity = GetFirstValue(raw, "severity") ?? string.Empty,
                 Status = GetFirstValue(raw, "status") ?? string.Empty,
@@ -62,6 +64,15 @@ public static class VaronisAlertMapper
             JsonValueKind.String => value.GetString() ?? string.Empty,
             _ => value.ToString()
         };
+    }
+
+    internal static string GenerateDeterministicId(IReadOnlyDictionary<string, string> raw)
+    {
+        var content = string.Join("|", raw
+            .OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(kv => $"{kv.Key}={kv.Value}"));
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(content));
+        return Convert.ToHexString(hash)[..32].ToLowerInvariant();
     }
 
     private static string? GetFirstValue(IReadOnlyDictionary<string, string> values, params string[] keys)

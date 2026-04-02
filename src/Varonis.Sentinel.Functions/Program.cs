@@ -1,3 +1,4 @@
+using Azure.Core;
 using Azure.Identity;
 using Azure.Monitor.Ingestion;
 using Azure.Storage.Blobs;
@@ -44,18 +45,41 @@ var host = new HostBuilder()
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
-        var webJobsStorage = configuration["AzureWebJobsStorage"];
-        if (string.IsNullOrWhiteSpace(webJobsStorage))
+        var storageAccountName = configuration["AzureWebJobsStorage__accountName"];
+        if (!string.IsNullOrWhiteSpace(storageAccountName))
         {
-            throw new InvalidOperationException("Configuration value 'AzureWebJobsStorage' is required.");
+            services.AddSingleton(new BlobServiceClient(
+                new Uri($"https://{storageAccountName}.blob.core.windows.net"),
+                new DefaultAzureCredential()));
         }
+        else
+        {
+            var webJobsStorage = configuration["AzureWebJobsStorage"];
+            if (string.IsNullOrWhiteSpace(webJobsStorage))
+            {
+                throw new InvalidOperationException(
+                    "Configure either 'AzureWebJobsStorage__accountName' (managed identity) or 'AzureWebJobsStorage' (connection string).");
+            }
 
-        services.AddSingleton(new BlobServiceClient(webJobsStorage));
+            services.AddSingleton(new BlobServiceClient(webJobsStorage));
+        }
 
         services.AddSingleton(provider =>
         {
             var ingestionOptions = provider.GetRequiredService<IOptions<IngestionOptions>>().Value;
-            return new LogsIngestionClient(new Uri(ingestionOptions.Endpoint), new DefaultAzureCredential());
+            return new LogsIngestionClient(
+                new Uri(ingestionOptions.Endpoint),
+                new DefaultAzureCredential(),
+                new LogsIngestionClientOptions
+                {
+                    Retry =
+                    {
+                        MaxRetries = 3,
+                        Delay = TimeSpan.FromSeconds(2),
+                        Mode = RetryMode.Exponential,
+                        MaxDelay = TimeSpan.FromSeconds(30)
+                    }
+                });
         });
 
         services.AddHttpClient<IVaronisApiClient, VaronisApiClient>((provider, client) =>

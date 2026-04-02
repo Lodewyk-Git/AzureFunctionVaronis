@@ -151,10 +151,22 @@ public sealed class VaronisApiClient : IVaronisApiClient
         throw new InvalidOperationException("Varonis API request failed after all retry attempts.");
     }
 
-    private static Uri BuildSearchUri(string searchUrl)
+    internal Uri BuildSearchUri(string searchUrl)
     {
         if (Uri.TryCreate(searchUrl, UriKind.Absolute, out var absoluteUri))
         {
+            var baseUri = _httpClient.BaseAddress;
+            if (baseUri is not null &&
+                !absoluteUri.Host.Equals(baseUri.Host, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning(
+                    "Rejected search URL with unexpected host '{RejectedHost}'. Expected '{ExpectedHost}'.",
+                    absoluteUri.Host,
+                    baseUri.Host);
+                throw new InvalidOperationException(
+                    $"Search URL host '{absoluteUri.Host}' does not match the configured Varonis base URL host '{baseUri.Host}'.");
+            }
+
             return absoluteUri;
         }
 
