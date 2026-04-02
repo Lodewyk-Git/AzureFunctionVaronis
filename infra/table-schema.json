@@ -1,0 +1,22 @@
+{
+  "tableName": "VaronisAlerts_CL",
+  "description": "Varonis threat alerts ingested via Azure Monitor Logs Ingestion API.",
+  "plan": "Analytics",
+  "retentionInDays": 30,
+  "totalRetentionInDays": 90,
+  "columns": [
+    { "name": "TimeGenerated", "type": "datetime" },
+    { "name": "AlertId", "type": "string" },
+    { "name": "AlertTimeUtc", "type": "datetime" },
+    { "name": "Severity", "type": "string" },
+    { "name": "Status", "type": "string" },
+    { "name": "ThreatDetectionPolicy", "type": "string" },
+    { "name": "Description", "type": "string" },
+    { "name": "Actor", "type": "string" },
+    { "name": "Asset", "type": "string" },
+    { "name": "SourceSystem", "type": "string" },
+    { "name": "RawRecord", "type": "dynamic" },
+    { "name": "IngestedAtUtc", "type": "datetime" },
+    { "name": "CorrelationId", "type": "string" }
+  ]
+}

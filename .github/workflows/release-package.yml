@@ -1,0 +1,74 @@
+name: release-package
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag (for example v1.0.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release metadata
+        id: meta
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.release_tag }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "release_name=AzureFunctionVaronis $TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+
+      - name: Restore
+        run: dotnet restore AzureFunctionVaronis.sln
+
+      - name: Build
+        run: dotnet build AzureFunctionVaronis.sln --configuration Release --no-restore
+
+      - name: Build package
+        shell: pwsh
+        run: ./scripts/Build-Package.ps1 -Configuration Release -SkipTests
+
+      - name: Prepare release assets
+        id: assets
+        shell: bash
+        run: |
+          ZIP_PATH=$(ls -t functionapp/packages/*.zip | head -n 1)
+          HASH_PATH="${ZIP_PATH}.sha256"
+          cp "$ZIP_PATH" functionapp/packages/varonis-sentinel-functions.zip
+          cp "$HASH_PATH" functionapp/packages/varonis-sentinel-functions.zip.sha256
+          echo "zip=$ZIP_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ${{ steps.meta.outputs.release_name }}
+          generate_release_notes: true
+          files: |
+            functionapp/packages/varonis-sentinel-functions.zip
+            functionapp/packages/varonis-sentinel-functions.zip.sha256
+            functionapp/manifests/latest.json
+            ${{ steps.assets.outputs.zip }}

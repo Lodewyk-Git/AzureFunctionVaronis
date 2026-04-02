@@ -1,0 +1,122 @@
+name: ci-cd
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      environment_name:
+        description: "Target environment name (dev/test/prod)"
+        required: true
+        default: "dev"
+      resource_group:
+        description: "Azure resource group name"
+        required: true
+      location:
+        description: "Azure location"
+        required: true
+        default: "eastus2"
+      name_prefix:
+        description: "Resource name prefix"
+        required: true
+        default: "varonis"
+      workspace_resource_id:
+        description: "Sentinel-enabled Log Analytics workspace resource ID"
+        required: true
+      table_name:
+        description: "Destination custom table"
+        required: true
+        default: "VaronisAlerts_CL"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build-package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+
+      - name: Restore
+        run: dotnet restore AzureFunctionVaronis.sln
+
+      - name: Build
+        run: dotnet build AzureFunctionVaronis.sln --configuration Release --no-restore
+
+      - name: Build Function Package
+        shell: pwsh
+        run: ./scripts/Build-Package.ps1 -Configuration Release -SkipTests
+
+      - name: Upload Package Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: function-package
+          path: |
+            functionapp/packages/*.zip
+            functionapp/packages/*.sha256
+            functionapp/manifests/*.json
+
+  deploy-azure:
+    if: github.event_name == 'workflow_dispatch'
+    needs: build-package
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Package Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: function-package
+          path: functionapp
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Resolve Package Path
+        id: package
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem -Path "functionapp/packages/*.zip" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if ($null -eq $zip) { throw "No package zip found in artifact." }
+          "path=$($zip.FullName)" >> $env:GITHUB_OUTPUT
+          "version=$($zip.BaseName)" >> $env:GITHUB_OUTPUT
+
+      - name: Deploy Solution
+        shell: pwsh
+        env:
+          VARONIS_BASE_URL: ${{ secrets.VARONIS_BASE_URL }}
+          VARONIS_API_KEY: ${{ secrets.VARONIS_API_KEY }}
+        run: |
+          $secureApiKey = ConvertTo-SecureString $env:VARONIS_API_KEY -AsPlainText -Force
+          ./scripts/Deploy-Solution.ps1 `
+            -ResourceGroupName "${{ github.event.inputs.resource_group }}" `
+            -Location "${{ github.event.inputs.location }}" `
+            -EnvironmentName "${{ github.event.inputs.environment_name }}" `
+            -NamePrefix "${{ github.event.inputs.name_prefix }}" `
+            -WorkspaceResourceId "${{ github.event.inputs.workspace_resource_id }}" `
+            -TableName "${{ github.event.inputs.table_name }}" `
+            -VaronisBaseUrl $env:VARONIS_BASE_URL `
+            -VaronisApiKey $secureApiKey `
+            -SkipPackageBuild `
+            -PackagePath "${{ steps.package.outputs.path }}" `
+            -PackageVersion "${{ steps.package.outputs.version }}" `
+            -RunValidation

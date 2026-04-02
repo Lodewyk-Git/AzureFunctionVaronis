@@ -1,0 +1,1023 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.41.2.15936",
+      "templateHash": "3290382522339918991"
+    }
+  },
+  "parameters": {
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Azure region for deployment."
+      }
+    },
+    "environmentName": {
+      "type": "string",
+      "metadata": {
+        "description": "Environment short name such as dev, test, or prod."
+      }
+    },
+    "namePrefix": {
+      "type": "string",
+      "defaultValue": "varonis",
+      "metadata": {
+        "description": "Naming prefix for all resources."
+      }
+    },
+    "ownerEmail": {
+      "type": "string",
+      "defaultValue": "Lood@buisecops.co.za",
+      "metadata": {
+        "description": "Owner contact email used for resource tags."
+      }
+    },
+    "workspaceResourceId": {
+      "type": "string",
+      "metadata": {
+        "description": "Existing Sentinel-enabled Log Analytics workspace resource ID."
+      }
+    },
+    "appInsightsWorkspaceResourceId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Optional existing Log Analytics workspace resource ID for Application Insights."
+      }
+    },
+    "timerSchedule": {
+      "type": "string",
+      "defaultValue": "0 */5 * * * *",
+      "metadata": {
+        "description": "Function timer schedule expression."
+      }
+    },
+    "runFromPackageValue": {
+      "type": "string",
+      "defaultValue": "https://github.com/Lodewyk-Git/AzureFunctionVaronis/releases/latest/download/varonis-sentinel-functions.zip",
+      "metadata": {
+        "description": "Default WEBSITE_RUN_FROM_PACKAGE value. Keep default to use latest GitHub release package."
+      }
+    },
+    "tableName": {
+      "type": "string",
+      "defaultValue": "VaronisAlerts_CL",
+      "metadata": {
+        "description": "Destination custom table name."
+      }
+    },
+    "streamName": {
+      "type": "string",
+      "defaultValue": "Custom-VaronisAlerts_CL",
+      "metadata": {
+        "description": "Data stream name used in DCR."
+      }
+    },
+    "functionPlanSkuName": {
+      "type": "string",
+      "defaultValue": "Y1",
+      "metadata": {
+        "description": "Function App hosting plan SKU."
+      }
+    },
+    "functionPlanSkuTier": {
+      "type": "string",
+      "defaultValue": "Dynamic",
+      "metadata": {
+        "description": "Function App hosting plan tier."
+      }
+    },
+    "enableDiagnostics": {
+      "type": "bool",
+      "defaultValue": true,
+      "metadata": {
+        "description": "Enable diagnostic settings."
+      }
+    }
+  },
+  "variables": {
+    "tableColumns": [
+      {
+        "name": "TimeGenerated",
+        "type": "datetime"
+      },
+      {
+        "name": "AlertId",
+        "type": "string"
+      },
+      {
+        "name": "AlertTimeUtc",
+        "type": "datetime"
+      },
+      {
+        "name": "Severity",
+        "type": "string"
+      },
+      {
+        "name": "Status",
+        "type": "string"
+      },
+      {
+        "name": "ThreatDetectionPolicy",
+        "type": "string"
+      },
+      {
+        "name": "Description",
+        "type": "string"
+      },
+      {
+        "name": "Actor",
+        "type": "string"
+      },
+      {
+        "name": "Asset",
+        "type": "string"
+      },
+      {
+        "name": "SourceSystem",
+        "type": "string"
+      },
+      {
+        "name": "RawRecord",
+        "type": "dynamic"
+      },
+      {
+        "name": "IngestedAtUtc",
+        "type": "datetime"
+      },
+      {
+        "name": "CorrelationId",
+        "type": "string"
+      }
+    ]
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "coreDeployment",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "environmentName": {
+            "value": "[parameters('environmentName')]"
+          },
+          "namePrefix": {
+            "value": "[parameters('namePrefix')]"
+          },
+          "ownerEmail": {
+            "value": "[parameters('ownerEmail')]"
+          },
+          "workspaceResourceId": {
+            "value": "[parameters('workspaceResourceId')]"
+          },
+          "appInsightsWorkspaceResourceId": {
+            "value": "[parameters('appInsightsWorkspaceResourceId')]"
+          },
+          "functionPlanSkuName": {
+            "value": "[parameters('functionPlanSkuName')]"
+          },
+          "functionPlanSkuTier": {
+            "value": "[parameters('functionPlanSkuTier')]"
+          },
+          "timerSchedule": {
+            "value": "[parameters('timerSchedule')]"
+          },
+          "runFromPackageValue": {
+            "value": "[parameters('runFromPackageValue')]"
+          },
+          "enableDiagnostics": {
+            "value": "[parameters('enableDiagnostics')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.41.2.15936",
+              "templateHash": "9016128402111001491"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string",
+              "defaultValue": "[resourceGroup().location]",
+              "metadata": {
+                "description": "Azure region for all new resources."
+              }
+            },
+            "environmentName": {
+              "type": "string",
+              "metadata": {
+                "description": "Environment short name such as dev, test, or prod."
+              }
+            },
+            "namePrefix": {
+              "type": "string",
+              "defaultValue": "varonis",
+              "metadata": {
+                "description": "Naming prefix for all resources."
+              }
+            },
+            "ownerEmail": {
+              "type": "string",
+              "defaultValue": "Lood@buisecops.co.za",
+              "metadata": {
+                "description": "Owner contact email used for resource tags."
+              }
+            },
+            "workspaceResourceId": {
+              "type": "string",
+              "metadata": {
+                "description": "Existing Sentinel-enabled Log Analytics workspace resource ID."
+              }
+            },
+            "appInsightsWorkspaceResourceId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Optional existing Log Analytics workspace resource ID used for Application Insights linkage. Defaults to workspaceResourceId."
+              }
+            },
+            "functionPlanSkuName": {
+              "type": "string",
+              "defaultValue": "Y1",
+              "metadata": {
+                "description": "Function App hosting SKU. Y1 = Consumption."
+              }
+            },
+            "functionPlanSkuTier": {
+              "type": "string",
+              "defaultValue": "Dynamic",
+              "metadata": {
+                "description": "Function App hosting tier."
+              }
+            },
+            "timerSchedule": {
+              "type": "string",
+              "defaultValue": "0 */5 * * * *",
+              "metadata": {
+                "description": "Function timer schedule."
+              }
+            },
+            "runFromPackageValue": {
+              "type": "string",
+              "defaultValue": "https://github.com/Lodewyk-Git/AzureFunctionVaronis/releases/latest/download/varonis-sentinel-functions.zip",
+              "metadata": {
+                "description": "Default WEBSITE_RUN_FROM_PACKAGE value. Set to a release package URL or use 1 for zipdeploy."
+              }
+            },
+            "varonisApiKeySecretName": {
+              "type": "string",
+              "defaultValue": "VaronisApiKey",
+              "metadata": {
+                "description": "The Key Vault secret name containing the Varonis API key."
+              }
+            },
+            "enableDiagnostics": {
+              "type": "bool",
+              "defaultValue": true,
+              "metadata": {
+                "description": "Enable diagnostic settings for core resources."
+              }
+            },
+            "keyVaultSecretsUserRoleDefinitionId": {
+              "type": "string",
+              "defaultValue": "4633458b-17de-408a-b874-0445c86b69e6",
+              "metadata": {
+                "description": "Key Vault Secrets User role definition ID."
+              }
+            }
+          },
+          "variables": {
+            "normalizedPrefix": "[toLower(replace(parameters('namePrefix'), '-', ''))]",
+            "normalizedEnv": "[toLower(replace(parameters('environmentName'), '-', ''))]",
+            "uniqueSuffix": "[toLower(uniqueString(resourceGroup().id, parameters('environmentName'), parameters('namePrefix')))]",
+            "functionStorageAccountName": "[take(format('{0}{1}func{2}', variables('normalizedPrefix'), variables('normalizedEnv'), variables('uniqueSuffix')), 24)]",
+            "packageStorageAccountName": "[take(format('{0}{1}pkg{2}', variables('normalizedPrefix'), variables('normalizedEnv'), variables('uniqueSuffix')), 24)]",
+            "appServicePlanName": "[format('{0}-{1}-func-plan', parameters('namePrefix'), parameters('environmentName'))]",
+            "functionAppName": "[take(format('{0}-{1}-varonis-func-{2}', parameters('namePrefix'), parameters('environmentName'), variables('uniqueSuffix')), 60)]",
+            "keyVaultName": "[take(format('{0}-{1}-kv-{2}', parameters('namePrefix'), parameters('environmentName'), variables('uniqueSuffix')), 24)]",
+            "appInsightsName": "[format('{0}-{1}-appi', parameters('namePrefix'), parameters('environmentName'))]",
+            "contentShareName": "[toLower(take(replace(variables('functionAppName'), '-', ''), 63))]",
+            "resolvedWorkspaceResourceId": "[parameters('workspaceResourceId')]",
+            "resolvedWorkspaceName": "[last(split(parameters('workspaceResourceId'), '/'))]",
+            "resolvedAppInsightsWorkspaceResourceId": "[if(empty(parameters('appInsightsWorkspaceResourceId')), variables('resolvedWorkspaceResourceId'), parameters('appInsightsWorkspaceResourceId'))]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Storage/storageAccounts",
+              "apiVersion": "2023-05-01",
+              "name": "[variables('functionStorageAccountName')]",
+              "location": "[parameters('location')]",
+              "tags": {
+                "Environment": "[parameters('environmentName')]",
+                "Owner": "[parameters('ownerEmail')]",
+                "Workload": "AzureFunctionVaronis"
+              },
+              "sku": {
+                "name": "Standard_LRS"
+              },
+              "kind": "StorageV2",
+              "properties": {
+                "allowBlobPublicAccess": false,
+                "supportsHttpsTrafficOnly": true,
+                "minimumTlsVersion": "TLS1_2"
+              }
+            },
+            {
+              "type": "Microsoft.Storage/storageAccounts",
+              "apiVersion": "2023-05-01",
+              "name": "[variables('packageStorageAccountName')]",
+              "location": "[parameters('location')]",
+              "tags": {
+                "Environment": "[parameters('environmentName')]",
+                "Owner": "[parameters('ownerEmail')]",
+                "Workload": "AzureFunctionVaronis"
+              },
+              "sku": {
+                "name": "Standard_LRS"
+              },
+              "kind": "StorageV2",
+              "properties": {
+                "allowBlobPublicAccess": false,
+                "supportsHttpsTrafficOnly": true,
+                "minimumTlsVersion": "TLS1_2"
+              }
+            },
+            {
+              "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+              "apiVersion": "2023-05-01",
+              "name": "[format('{0}/default/varonis-checkpoints', variables('functionStorageAccountName'))]",
+              "properties": {
+                "publicAccess": "None"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', variables('functionStorageAccountName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+              "apiVersion": "2023-05-01",
+              "name": "[format('{0}/default/varonis-failures', variables('functionStorageAccountName'))]",
+              "properties": {
+                "publicAccess": "None"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', variables('functionStorageAccountName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+              "apiVersion": "2023-05-01",
+              "name": "[format('{0}/default/function-packages', variables('packageStorageAccountName'))]",
+              "properties": {
+                "publicAccess": "None"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', variables('packageStorageAccountName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Insights/components",
+              "apiVersion": "2020-02-02",
+              "name": "[variables('appInsightsName')]",
+              "location": "[parameters('location')]",
+              "kind": "web",
+              "tags": {
+                "Environment": "[parameters('environmentName')]",
+                "Owner": "[parameters('ownerEmail')]",
+                "Workload": "AzureFunctionVaronis"
+              },
+              "properties": {
+                "Application_Type": "web",
+                "WorkspaceResourceId": "[variables('resolvedAppInsightsWorkspaceResourceId')]"
+              }
+            },
+            {
+              "type": "Microsoft.Web/serverfarms",
+              "apiVersion": "2023-12-01",
+              "name": "[variables('appServicePlanName')]",
+              "location": "[parameters('location')]",
+              "tags": {
+                "Environment": "[parameters('environmentName')]",
+                "Owner": "[parameters('ownerEmail')]",
+                "Workload": "AzureFunctionVaronis"
+              },
+              "sku": {
+                "name": "[parameters('functionPlanSkuName')]",
+                "tier": "[parameters('functionPlanSkuTier')]"
+              },
+              "kind": "functionapp",
+              "properties": {
+                "reserved": false
+              }
+            },
+            {
+              "type": "Microsoft.KeyVault/vaults",
+              "apiVersion": "2023-07-01",
+              "name": "[variables('keyVaultName')]",
+              "location": "[parameters('location')]",
+              "tags": {
+                "Environment": "[parameters('environmentName')]",
+                "Owner": "[parameters('ownerEmail')]",
+                "Workload": "AzureFunctionVaronis"
+              },
+              "properties": {
+                "tenantId": "[tenant().tenantId]",
+                "sku": {
+                  "name": "standard",
+                  "family": "A"
+                },
+                "enableRbacAuthorization": true,
+                "enablePurgeProtection": true,
+                "softDeleteRetentionInDays": 90,
+                "publicNetworkAccess": "Enabled",
+                "networkAcls": {
+                  "defaultAction": "Allow",
+                  "bypass": "AzureServices"
+                }
+              }
+            },
+            {
+              "type": "Microsoft.Web/sites",
+              "apiVersion": "2023-12-01",
+              "name": "[variables('functionAppName')]",
+              "location": "[parameters('location')]",
+              "kind": "functionapp",
+              "tags": {
+                "Environment": "[parameters('environmentName')]",
+                "Owner": "[parameters('ownerEmail')]",
+                "Workload": "AzureFunctionVaronis"
+              },
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "properties": {
+                "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('appServicePlanName'))]",
+                "httpsOnly": true,
+                "clientAffinityEnabled": false,
+                "siteConfig": {
+                  "alwaysOn": false,
+                  "minTlsVersion": "1.2",
+                  "ftpsState": "Disabled",
+                  "appSettings": [
+                    {
+                      "name": "FUNCTIONS_WORKER_RUNTIME",
+                      "value": "dotnet-isolated"
+                    },
+                    {
+                      "name": "FUNCTIONS_EXTENSION_VERSION",
+                      "value": "~4"
+                    },
+                    {
+                      "name": "AzureWebJobsStorage",
+                      "value": "[format('DefaultEndpointsProtocol=https;AccountName={0};AccountKey={1};EndpointSuffix={2}', variables('functionStorageAccountName'), listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('functionStorageAccountName')), '2023-05-01').keys[0].value, environment().suffixes.storage)]"
+                    },
+                    {
+                      "name": "WEBSITE_CONTENTAZUREFILECONNECTIONSTRING",
+                      "value": "[format('DefaultEndpointsProtocol=https;AccountName={0};AccountKey={1};EndpointSuffix={2}', variables('functionStorageAccountName'), listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('functionStorageAccountName')), '2023-05-01').keys[0].value, environment().suffixes.storage)]"
+                    },
+                    {
+                      "name": "WEBSITE_CONTENTSHARE",
+                      "value": "[variables('contentShareName')]"
+                    },
+                    {
+                      "name": "WEBSITE_RUN_FROM_PACKAGE",
+                      "value": "[parameters('runFromPackageValue')]"
+                    },
+                    {
+                      "name": "APPINSIGHTS_CONNECTION_STRING",
+                      "value": "[reference(resourceId('Microsoft.Insights/components', variables('appInsightsName')), '2020-02-02').ConnectionString]"
+                    },
+                    {
+                      "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
+                      "value": "[reference(resourceId('Microsoft.Insights/components', variables('appInsightsName')), '2020-02-02').ConnectionString]"
+                    },
+                    {
+                      "name": "TimerSchedule",
+                      "value": "[parameters('timerSchedule')]"
+                    },
+                    {
+                      "name": "Checkpoint__ContainerName",
+                      "value": "varonis-checkpoints"
+                    },
+                    {
+                      "name": "Checkpoint__BlobName",
+                      "value": "varonis-alerts-checkpoint.json"
+                    },
+                    {
+                      "name": "Checkpoint__InitialLookback",
+                      "value": "14.00:00:00"
+                    },
+                    {
+                      "name": "FailureStore__ContainerName",
+                      "value": "varonis-failures"
+                    },
+                    {
+                      "name": "Varonis__ApiKey",
+                      "value": "[format('@Microsoft.KeyVault(SecretUri={0}secrets/{1}/)', reference(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), '2023-07-01').vaultUri, parameters('varonisApiKeySecretName'))]"
+                    },
+                    {
+                      "name": "Varonis__ApiKeySecretName",
+                      "value": "[parameters('varonisApiKeySecretName')]"
+                    },
+                    {
+                      "name": "KeyVault__VaultUri",
+                      "value": "[reference(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), '2023-07-01').vaultUri]"
+                    }
+                  ]
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Insights/components', variables('appInsightsName'))]",
+                "[resourceId('Microsoft.Web/serverfarms', variables('appServicePlanName'))]",
+                "[resourceId('Microsoft.Storage/storageAccounts', variables('functionStorageAccountName'))]",
+                "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
+              "name": "[guid(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), variables('functionAppName'), parameters('keyVaultSecretsUserRoleDefinitionId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', parameters('keyVaultSecretsUserRoleDefinitionId'))]",
+                "principalId": "[reference(resourceId('Microsoft.Web/sites', variables('functionAppName')), '2023-12-01', 'full').identity.principalId]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Web/sites', variables('functionAppName'))]",
+                "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
+              ]
+            },
+            {
+              "condition": "[parameters('enableDiagnostics')]",
+              "type": "Microsoft.Insights/diagnosticSettings",
+              "apiVersion": "2021-05-01-preview",
+              "scope": "[resourceId('Microsoft.Web/sites', variables('functionAppName'))]",
+              "name": "send-to-workspace",
+              "properties": {
+                "workspaceId": "[variables('resolvedWorkspaceResourceId')]",
+                "logs": [
+                  {
+                    "categoryGroup": "allLogs",
+                    "enabled": true
+                  }
+                ],
+                "metrics": [
+                  {
+                    "category": "AllMetrics",
+                    "enabled": true
+                  }
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Web/sites', variables('functionAppName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "functionAppName": {
+              "type": "string",
+              "value": "[variables('functionAppName')]"
+            },
+            "functionPrincipalId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Web/sites', variables('functionAppName')), '2023-12-01', 'full').identity.principalId]"
+            },
+            "functionAppResourceId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Web/sites', variables('functionAppName'))]"
+            },
+            "functionStorageAccountName": {
+              "type": "string",
+              "value": "[variables('functionStorageAccountName')]"
+            },
+            "packageStorageAccountName": {
+              "type": "string",
+              "value": "[variables('packageStorageAccountName')]"
+            },
+            "packageContainerName": {
+              "type": "string",
+              "value": "function-packages"
+            },
+            "keyVaultName": {
+              "type": "string",
+              "value": "[variables('keyVaultName')]"
+            },
+            "keyVaultUri": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), '2023-07-01').vaultUri]"
+            },
+            "workspaceName": {
+              "type": "string",
+              "value": "[variables('resolvedWorkspaceName')]"
+            },
+            "workspaceResourceId": {
+              "type": "string",
+              "value": "[variables('resolvedWorkspaceResourceId')]"
+            },
+            "appInsightsName": {
+              "type": "string",
+              "value": "[variables('appInsightsName')]"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "monitoringDeployment",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "environmentName": {
+            "value": "[parameters('environmentName')]"
+          },
+          "namePrefix": {
+            "value": "[parameters('namePrefix')]"
+          },
+          "ownerEmail": {
+            "value": "[parameters('ownerEmail')]"
+          },
+          "workspaceResourceId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'coreDeployment'), '2025-04-01').outputs.workspaceResourceId.value]"
+          },
+          "functionPrincipalId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'coreDeployment'), '2025-04-01').outputs.functionPrincipalId.value]"
+          },
+          "tableName": {
+            "value": "[parameters('tableName')]"
+          },
+          "streamName": {
+            "value": "[parameters('streamName')]"
+          },
+          "tableColumns": {
+            "value": "[variables('tableColumns')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.41.2.15936",
+              "templateHash": "9654785950192693380"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string",
+              "defaultValue": "[resourceGroup().location]",
+              "metadata": {
+                "description": "Azure region for monitoring resources."
+              }
+            },
+            "environmentName": {
+              "type": "string",
+              "metadata": {
+                "description": "Environment short name such as dev, test, or prod."
+              }
+            },
+            "namePrefix": {
+              "type": "string",
+              "defaultValue": "varonis",
+              "metadata": {
+                "description": "Naming prefix for monitoring resources."
+              }
+            },
+            "ownerEmail": {
+              "type": "string",
+              "defaultValue": "Lood@buisecops.co.za",
+              "metadata": {
+                "description": "Owner contact email used for resource tags."
+              }
+            },
+            "workspaceResourceId": {
+              "type": "string",
+              "metadata": {
+                "description": "Target Log Analytics workspace resource ID."
+              }
+            },
+            "functionPrincipalId": {
+              "type": "string",
+              "metadata": {
+                "description": "Function App managed identity principal ID."
+              }
+            },
+            "tableName": {
+              "type": "string",
+              "defaultValue": "VaronisAlerts_CL",
+              "metadata": {
+                "description": "Destination custom log table name."
+              }
+            },
+            "streamName": {
+              "type": "string",
+              "defaultValue": "Custom-VaronisAlerts_CL",
+              "metadata": {
+                "description": "Log stream name used in DCR declarations."
+              }
+            },
+            "tableColumns": {
+              "type": "array",
+              "defaultValue": [
+                {
+                  "name": "TimeGenerated",
+                  "type": "datetime"
+                },
+                {
+                  "name": "AlertId",
+                  "type": "string"
+                },
+                {
+                  "name": "AlertTimeUtc",
+                  "type": "datetime"
+                },
+                {
+                  "name": "Severity",
+                  "type": "string"
+                },
+                {
+                  "name": "Status",
+                  "type": "string"
+                },
+                {
+                  "name": "ThreatDetectionPolicy",
+                  "type": "string"
+                },
+                {
+                  "name": "Description",
+                  "type": "string"
+                },
+                {
+                  "name": "Actor",
+                  "type": "string"
+                },
+                {
+                  "name": "Asset",
+                  "type": "string"
+                },
+                {
+                  "name": "SourceSystem",
+                  "type": "string"
+                },
+                {
+                  "name": "RawRecord",
+                  "type": "dynamic"
+                },
+                {
+                  "name": "IngestedAtUtc",
+                  "type": "datetime"
+                },
+                {
+                  "name": "CorrelationId",
+                  "type": "string"
+                }
+              ],
+              "metadata": {
+                "description": "Custom table columns to enforce."
+              }
+            },
+            "tableRetentionInDays": {
+              "type": "int",
+              "defaultValue": 30,
+              "metadata": {
+                "description": "Table retention in days."
+              }
+            },
+            "tableTotalRetentionInDays": {
+              "type": "int",
+              "defaultValue": 90,
+              "metadata": {
+                "description": "Table total retention in days."
+              }
+            },
+            "createDataCollectionEndpoint": {
+              "type": "bool",
+              "defaultValue": true,
+              "metadata": {
+                "description": "Create Data Collection Endpoint. Keep true for stable Logs Ingestion endpoint behavior."
+              }
+            },
+            "dcrDataSenderRoleDefinitionId": {
+              "type": "string",
+              "defaultValue": "3913510d-42f4-4e42-8a64-420c390055eb",
+              "metadata": {
+                "description": "Data Collection Rule Data Sender role definition ID. Defaults to Monitoring Metrics Publisher."
+              }
+            }
+          },
+          "variables": {
+            "uniqueSuffix": "[toLower(uniqueString(resourceGroup().id, parameters('environmentName'), parameters('tableName')))]",
+            "workspaceName": "[last(split(parameters('workspaceResourceId'), '/'))]",
+            "workspaceSubscriptionId": "[split(parameters('workspaceResourceId'), '/')[2]]",
+            "workspaceResourceGroupName": "[split(parameters('workspaceResourceId'), '/')[4]]",
+            "dceName": "[take(format('{0}-{1}-dce-{2}', parameters('namePrefix'), parameters('environmentName'), variables('uniqueSuffix')), 60)]",
+            "dcrName": "[take(format('{0}-{1}-dcr-{2}', parameters('namePrefix'), parameters('environmentName'), variables('uniqueSuffix')), 60)]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.OperationalInsights/workspaces/tables",
+              "apiVersion": "2023-09-01",
+              "name": "[format('{0}/{1}', variables('workspaceName'), parameters('tableName'))]",
+              "properties": {
+                "plan": "Analytics",
+                "retentionInDays": "[parameters('tableRetentionInDays')]",
+                "totalRetentionInDays": "[parameters('tableTotalRetentionInDays')]",
+                "schema": {
+                  "name": "[parameters('tableName')]",
+                  "columns": "[parameters('tableColumns')]"
+                }
+              }
+            },
+            {
+              "condition": "[parameters('createDataCollectionEndpoint')]",
+              "type": "Microsoft.Insights/dataCollectionEndpoints",
+              "apiVersion": "2023-03-11",
+              "name": "[variables('dceName')]",
+              "location": "[parameters('location')]",
+              "kind": "Linux",
+              "tags": {
+                "Environment": "[parameters('environmentName')]",
+                "Owner": "[parameters('ownerEmail')]",
+                "Workload": "AzureFunctionVaronis"
+              },
+              "properties": {
+                "networkAcls": {
+                  "publicNetworkAccess": "Enabled"
+                }
+              }
+            },
+            {
+              "type": "Microsoft.Insights/dataCollectionRules",
+              "apiVersion": "2023-03-11",
+              "name": "[variables('dcrName')]",
+              "location": "[parameters('location')]",
+              "kind": "Direct",
+              "tags": {
+                "Environment": "[parameters('environmentName')]",
+                "Owner": "[parameters('ownerEmail')]",
+                "Workload": "AzureFunctionVaronis"
+              },
+              "properties": {
+                "dataCollectionEndpointId": "[if(parameters('createDataCollectionEndpoint'), resourceId('Microsoft.Insights/dataCollectionEndpoints', variables('dceName')), null())]",
+                "streamDeclarations": {
+                  "[format('{0}', parameters('streamName'))]": {
+                    "columns": "[parameters('tableColumns')]"
+                  }
+                },
+                "destinations": {
+                  "logAnalytics": [
+                    {
+                      "name": "logAnalyticsDestination",
+                      "workspaceResourceId": "[parameters('workspaceResourceId')]"
+                    }
+                  ]
+                },
+                "dataFlows": [
+                  {
+                    "streams": [
+                      "[parameters('streamName')]"
+                    ],
+                    "destinations": [
+                      "logAnalyticsDestination"
+                    ],
+                    "transformKql": "source",
+                    "outputStream": "[parameters('streamName')]"
+                  }
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Insights/dataCollectionEndpoints', variables('dceName'))]",
+                "[resourceId('Microsoft.OperationalInsights/workspaces/tables', split(format('{0}/{1}', variables('workspaceName'), parameters('tableName')), '/')[0], split(format('{0}/{1}', variables('workspaceName'), parameters('tableName')), '/')[1])]"
+              ]
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Insights/dataCollectionRules', variables('dcrName'))]",
+              "name": "[guid(resourceId('Microsoft.Insights/dataCollectionRules', variables('dcrName')), parameters('functionPrincipalId'), parameters('dcrDataSenderRoleDefinitionId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', parameters('dcrDataSenderRoleDefinitionId'))]",
+                "principalId": "[parameters('functionPrincipalId')]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Insights/dataCollectionRules', variables('dcrName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "tableName": {
+              "type": "string",
+              "value": "[parameters('tableName')]"
+            },
+            "streamName": {
+              "type": "string",
+              "value": "[parameters('streamName')]"
+            },
+            "dcrResourceId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Insights/dataCollectionRules', variables('dcrName'))]"
+            },
+            "dcrImmutableId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Insights/dataCollectionRules', variables('dcrName')), '2023-03-11').immutableId]"
+            },
+            "dceResourceId": {
+              "type": "string",
+              "value": "[if(parameters('createDataCollectionEndpoint'), resourceId('Microsoft.Insights/dataCollectionEndpoints', variables('dceName')), '')]"
+            },
+            "logsIngestionEndpoint": {
+              "type": "string",
+              "value": "[if(parameters('createDataCollectionEndpoint'), reference(resourceId('Microsoft.Insights/dataCollectionEndpoints', variables('dceName')), '2023-03-11', 'full').properties.logsIngestion.endpoint, '')]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', 'coreDeployment')]"
+      ]
+    }
+  ],
+  "outputs": {
+    "functionAppName": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'coreDeployment'), '2025-04-01').outputs.functionAppName.value]"
+    },
+    "functionAppResourceId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'coreDeployment'), '2025-04-01').outputs.functionAppResourceId.value]"
+    },
+    "packageStorageAccountName": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'coreDeployment'), '2025-04-01').outputs.packageStorageAccountName.value]"
+    },
+    "packageContainerName": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'coreDeployment'), '2025-04-01').outputs.packageContainerName.value]"
+    },
+    "keyVaultName": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'coreDeployment'), '2025-04-01').outputs.keyVaultName.value]"
+    },
+    "keyVaultUri": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'coreDeployment'), '2025-04-01').outputs.keyVaultUri.value]"
+    },
+    "workspaceName": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'coreDeployment'), '2025-04-01').outputs.workspaceName.value]"
+    },
+    "workspaceResourceId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'coreDeployment'), '2025-04-01').outputs.workspaceResourceId.value]"
+    },
+    "dcrResourceId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'monitoringDeployment'), '2025-04-01').outputs.dcrResourceId.value]"
+    },
+    "dcrImmutableId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'monitoringDeployment'), '2025-04-01').outputs.dcrImmutableId.value]"
+    },
+    "dceResourceId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'monitoringDeployment'), '2025-04-01').outputs.dceResourceId.value]"
+    },
+    "logsIngestionEndpoint": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'monitoringDeployment'), '2025-04-01').outputs.logsIngestionEndpoint.value]"
+    },
+    "tableOutputName": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'monitoringDeployment'), '2025-04-01').outputs.tableName.value]"
+    },
+    "streamOutputName": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'monitoringDeployment'), '2025-04-01').outputs.streamName.value]"
+    }
+  }
+}

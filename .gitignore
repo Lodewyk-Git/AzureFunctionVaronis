@@ -1,0 +1,28 @@
+# Build output
+**/bin/
+**/obj/
+**/TestResults/
+
+# Local settings and secrets
+**/local.settings.json
+**/*.user
+**/*.suo
+.env
+
+# Package artifacts
+functionapp/packages/*.zip
+functionapp/packages/*.sha256
+.artifacts/
+
+# Generated IaC build output
+infra/main.json
+infra/modules/*.json
+
+# Tooling
+.vs/
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store

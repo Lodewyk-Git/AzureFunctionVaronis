@@ -1,0 +1,27 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "TimerSchedule": "0 */5 * * * *",
+    "Varonis__BaseUrl": "https://<tenant>.varonis.net",
+    "Varonis__ApiKey": "",
+    "Varonis__ApiKeySecretName": "VaronisApiKey",
+    "Varonis__SeverityCsv": "Low,Medium,High,Informational",
+    "Varonis__StatusCsv": "New,Under Investigation",
+    "Varonis__ThreatDetectionPoliciesCsv": "",
+    "Varonis__MaxAlertRetrieval": "1000",
+    "Varonis__RequestTimeoutSeconds": "100",
+    "Varonis__RetryCount": "3",
+    "Varonis__RetryBaseDelaySeconds": "2",
+    "Ingestion__Endpoint": "https://<dce-id>.<region>-1.ingest.monitor.azure.com",
+    "Ingestion__DcrImmutableId": "<dcr-immutable-id>",
+    "Ingestion__StreamName": "Custom-VaronisAlerts_CL",
+    "Ingestion__MaxRecordsPerUpload": "5000",
+    "Checkpoint__ContainerName": "varonis-checkpoints",
+    "Checkpoint__BlobName": "varonis-alerts-checkpoint.json",
+    "Checkpoint__InitialLookback": "14.00:00:00",
+    "FailureStore__ContainerName": "varonis-failures",
+    "KeyVault__VaultUri": "https://<kv-name>.vault.azure.net/"
+  }
+}

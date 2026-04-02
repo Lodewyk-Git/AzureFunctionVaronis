@@ -1,0 +1,30 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": {
+      "value": "eastus"
+    },
+    "environmentName": {
+      "value": "secops"
+    },
+    "namePrefix": {
+      "value": "varonis"
+    },
+    "ownerEmail": {
+      "value": "Lood@buisecops.co.za"
+    },
+    "workspaceResourceId": {
+      "value": "/subscriptions/<subscription-id>/resourceGroups/<resource-group>/providers/Microsoft.OperationalInsights/workspaces/<sentinel-enabled-workspace-name>"
+    },
+    "runFromPackageValue": {
+      "value": "https://github.com/Lodewyk-Git/AzureFunctionVaronis/releases/latest/download/varonis-sentinel-functions.zip"
+    },
+    "tableName": {
+      "value": "VaronisAlerts_CL"
+    },
+    "streamName": {
+      "value": "Custom-VaronisAlerts_CL"
+    }
+  }
+}
