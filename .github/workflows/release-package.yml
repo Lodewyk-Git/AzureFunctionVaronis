@@ -58,6 +58,7 @@ jobs:
           HASH_PATH="${ZIP_PATH}.sha256"
           cp "$ZIP_PATH" functionapp/packages/varonis-sentinel-functions.zip
           cp "$HASH_PATH" functionapp/packages/varonis-sentinel-functions.zip.sha256
+          cp "$ZIP_PATH" functionapp/packages/AzureFunctionVaronis.zip
           echo "zip=$ZIP_PATH" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
@@ -67,6 +68,7 @@ jobs:
           name: ${{ steps.meta.outputs.release_name }}
           generate_release_notes: true
           files: |
+            functionapp/packages/AzureFunctionVaronis.zip
             functionapp/packages/varonis-sentinel-functions.zip
             functionapp/packages/varonis-sentinel-functions.zip.sha256
             functionapp/manifests/latest.json
