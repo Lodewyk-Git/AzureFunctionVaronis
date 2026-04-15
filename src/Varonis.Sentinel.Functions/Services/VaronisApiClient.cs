@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -13,6 +14,7 @@ namespace Varonis.Sentinel.Functions.Services;
 public sealed class VaronisApiClient : IVaronisApiClient
 {
     private const int ErrorBodyLogLimit = 4096;
+    private static readonly JsonElement NullJsonElement = JsonDocument.Parse("null").RootElement.Clone();
 
     private static readonly HashSet<HttpStatusCode> TransientStatusCodes =
     [
@@ -174,30 +176,11 @@ public sealed class VaronisApiClient : IVaronisApiClient
         VaronisSearchRequest request,
         CancellationToken cancellationToken = default)
     {
-        using var response = await SendWithRetryAsync(() =>
-        {
-            var requestMessage = new HttpRequestMessage(HttpMethod.Post, _options.SearchPath);
-            requestMessage.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-            requestMessage.Content = JsonContent.Create(request);
-            return requestMessage;
-        }, cancellationToken);
-
-        if (response.IsSuccessStatusCode)
-        {
-            var payload = await response.Content.ReadFromJsonAsync<VaronisSearchResponse>(JsonDefaults.SerializerOptions, cancellationToken);
-            return payload ?? new VaronisSearchResponse();
-        }
-
-        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
-        if (response.StatusCode != HttpStatusCode.BadRequest)
-        {
-            throw CreateSearchRequestException(response.StatusCode, responseBody, "modern");
-        }
-
-        _logger.LogWarning(
-            "Varonis search request with modern payload returned 400. Retrying with legacy payload. ResponseBody={ResponseBody}",
-            Truncate(responseBody, ErrorBodyLogLimit));
-
+        // This tenant's /search endpoint wants the query/rows/requestParams shape.
+        // The old "modern" shape (fromUtc/toUtc/severity) is rejected with
+        //   400 "Search request must contain a query field"
+        // so send the legacy shape directly. We keep the modern fallback in case we're
+        // ever pointed at a newer endpoint that prefers the other way round.
         var legacyRequest = BuildLegacySearchRequest(request);
         using var legacyResponse = await SendWithRetryAsync(() =>
         {
@@ -207,15 +190,408 @@ public sealed class VaronisApiClient : IVaronisApiClient
             return requestMessage;
         }, cancellationToken);
 
-        if (!legacyResponse.IsSuccessStatusCode)
+        if (legacyResponse.IsSuccessStatusCode)
         {
-            var legacyResponseBody = await legacyResponse.Content.ReadAsStringAsync(cancellationToken);
-            throw CreateSearchRequestException(legacyResponse.StatusCode, legacyResponseBody, "legacy");
+            return await ParseSearchResponseAsync(legacyResponse, "legacy", cancellationToken);
         }
 
-        _logger.LogInformation("Varonis legacy search payload succeeded after modern payload 400.");
-        var legacyPayload = await legacyResponse.Content.ReadFromJsonAsync<VaronisSearchResponse>(JsonDefaults.SerializerOptions, cancellationToken);
-        return legacyPayload ?? new VaronisSearchResponse();
+        // Legacy shape rejected - some tenants run a strictly modern API. Try the modern shape.
+        var legacyErrorBody = await legacyResponse.Content.ReadAsStringAsync(cancellationToken);
+        if (legacyResponse.StatusCode != HttpStatusCode.BadRequest)
+        {
+            throw CreateSearchRequestException(legacyResponse.StatusCode, legacyErrorBody, "legacy");
+        }
+
+        _logger.LogWarning(
+            "Varonis legacy payload returned 400. Retrying with modern payload. ResponseBody={ResponseBody}",
+            Truncate(legacyErrorBody, ErrorBodyLogLimit));
+
+        using var modernResponse = await SendWithRetryAsync(() =>
+        {
+            var requestMessage = new HttpRequestMessage(HttpMethod.Post, _options.SearchPath);
+            requestMessage.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+            requestMessage.Content = JsonContent.Create(request);
+            return requestMessage;
+        }, cancellationToken);
+
+        if (!modernResponse.IsSuccessStatusCode)
+        {
+            var modernErrorBody = await modernResponse.Content.ReadAsStringAsync(cancellationToken);
+            throw CreateSearchRequestException(modernResponse.StatusCode, modernErrorBody, "modern");
+        }
+
+        _logger.LogInformation("Varonis modern search payload succeeded after legacy payload 400.");
+        return await ParseSearchResponseAsync(modernResponse, "modern", cancellationToken);
+    }
+
+    /// <summary>
+    /// Tolerant parser: Varonis tenants have shipped at least three response shapes for /search:
+    ///   1. { columns: ["Alert.ID", ...], rows: [[...], ...], hasMore, searchUrl, nextSearchUrl }
+    ///   2. { columns: [{displayName, path, dataType}, ...], rows: [[...], ...], ... }
+    ///   3. { data: { columns: [...], rows: [...] }, status/searchId/... }
+    ///   4. A bare array of row objects.
+    /// Deserializing directly into VaronisSearchResponse fails on shapes 2-4 because the model
+    /// assumes shape 1. Parse via JsonDocument, identify the shape, and materialise our model
+    /// out of whatever we found. Raw body (truncated) is always logged at Information so we can
+    /// verify against prod without replaying.
+    /// </summary>
+    private async Task<VaronisSearchResponse> ParseSearchResponseAsync(
+        HttpResponseMessage response,
+        string payloadKind,
+        CancellationToken cancellationToken)
+    {
+        var rawBody = await response.Content.ReadAsStringAsync(cancellationToken);
+        _logger.LogInformation(
+            "Varonis search response received. PayloadKind={PayloadKind}, ByteLength={ByteLength}, Body={Body}",
+            payloadKind,
+            rawBody?.Length ?? 0,
+            Truncate(rawBody ?? string.Empty, ErrorBodyLogLimit));
+
+        if (string.IsNullOrWhiteSpace(rawBody))
+        {
+            return new VaronisSearchResponse();
+        }
+
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(rawBody);
+            return MapFlexibleSearchResponse(document.RootElement);
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            _logger.LogError(
+                ex,
+                "Failed to parse Varonis search response as JSON. PayloadKind={PayloadKind}.",
+                payloadKind);
+            throw;
+        }
+    }
+
+    private static VaronisSearchResponse MapFlexibleSearchResponse(JsonElement root)
+    {
+        // Shape 3 first: unwrap { data: {...} } if present.
+        if (root.ValueKind == JsonValueKind.Object &&
+            root.TryGetProperty("data", out var dataElement) &&
+            dataElement.ValueKind == JsonValueKind.Object &&
+            (dataElement.TryGetProperty("rows", out _) || dataElement.TryGetProperty("columns", out _)))
+        {
+            root = dataElement;
+        }
+
+        if (TryExtractSearchResultLink(root, out var searchResultLink))
+        {
+            return new VaronisSearchResponse
+            {
+                SearchUrl = searchResultLink,
+                NextSearchUrl = searchResultLink,
+                HasMore = true
+            };
+        }
+
+        // Shape 4: root is a JSON array of row objects. Harvest union of keys as columns.
+        if (root.ValueKind == JsonValueKind.Array)
+        {
+            var columnsSet = new LinkedHashSet();
+            var rows = new List<List<JsonElement>>();
+            foreach (var item in root.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object)
+                {
+                    continue;
+                }
+
+                foreach (var prop in item.EnumerateObject())
+                {
+                    columnsSet.Add(prop.Name);
+                }
+            }
+
+            foreach (var item in root.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object)
+                {
+                    continue;
+                }
+
+                var row = new List<JsonElement>();
+                foreach (var column in columnsSet.Items)
+                {
+                    row.Add(item.TryGetProperty(column, out var value)
+                        ? value.Clone()
+                        : NullJsonElement);
+                }
+                rows.Add(row);
+            }
+
+            return new VaronisSearchResponse
+            {
+                Columns = columnsSet.Items.ToList(),
+                Rows = rows,
+                HasMore = false
+            };
+        }
+
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            return new VaronisSearchResponse();
+        }
+
+        var columns = ExtractColumnNames(root);
+        var rowMatrix = ExtractRows(root);
+        var hasMore = root.TryGetProperty("hasMore", out var hm) && hm.ValueKind == JsonValueKind.True;
+        var searchUrl = TryGetString(root, "searchUrl");
+        var nextSearchUrl = TryGetString(root, "nextSearchUrl");
+
+        return new VaronisSearchResponse
+        {
+            Columns = columns,
+            Rows = rowMatrix,
+            HasMore = hasMore,
+            SearchUrl = searchUrl,
+            NextSearchUrl = nextSearchUrl
+        };
+    }
+
+    private static List<string> ExtractColumnNames(JsonElement root)
+    {
+        foreach (var candidate in new[]
+                 {
+                     new[] { "columns" },
+                     new[] { "rowsData", "attributePaths" },
+                     new[] { "attributePaths" },
+                     new[] { "rowsData", "columns" }
+                 })
+        {
+            if (!TryGetNestedProperty(root, out var columnsElement, candidate) ||
+                columnsElement.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            var result = new List<string>();
+            foreach (var column in columnsElement.EnumerateArray())
+            {
+                if (column.ValueKind == JsonValueKind.String)
+                {
+                    result.Add(column.GetString() ?? string.Empty);
+                    continue;
+                }
+
+                if (column.ValueKind == JsonValueKind.Object)
+                {
+                    // Prefer the Varonis legacy 'path' (e.g. "Alert.ID") so mapper rules match.
+                    var path = TryGetString(column, "path")
+                               ?? TryGetString(column, "pathName")
+                               ?? TryGetString(column, "name")
+                               ?? TryGetString(column, "displayName");
+                    result.Add(path ?? string.Empty);
+                }
+            }
+
+            if (result.Count > 0)
+            {
+                return result;
+            }
+        }
+
+        return new List<string>();
+    }
+
+    private static List<List<JsonElement>> ExtractRows(JsonElement root)
+    {
+        foreach (var candidate in new[]
+                 {
+                     new[] { "rows" },
+                     new[] { "rowsData", "rows" },
+                     new[] { "rowDatas" },
+                     new[] { "results" },
+                     new[] { "items" }
+                 })
+        {
+            if (!TryGetNestedProperty(root, out var rowsElement, candidate) ||
+                rowsElement.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            var rows = new List<List<JsonElement>>();
+            foreach (var rowElement in rowsElement.EnumerateArray())
+            {
+                if (rowElement.ValueKind == JsonValueKind.Array)
+                {
+                    rows.Add(rowElement.EnumerateArray().Select(e => e.Clone()).ToList());
+                    continue;
+                }
+
+                if (rowElement.ValueKind == JsonValueKind.Object &&
+                    rowElement.TryGetProperty("row", out var nestedRow) &&
+                    nestedRow.ValueKind == JsonValueKind.Array)
+                {
+                    rows.Add(nestedRow.EnumerateArray().Select(e => e.Clone()).ToList());
+                    continue;
+                }
+
+                if (rowElement.ValueKind == JsonValueKind.Object)
+                {
+                    // Object row: keep values in insertion order; mapper reconstructs by column.
+                    rows.Add(rowElement.EnumerateObject().Select(p => p.Value.Clone()).ToList());
+                }
+            }
+
+            return rows;
+        }
+
+        return new List<List<JsonElement>>();
+    }
+
+    private static bool TryExtractSearchResultLink(JsonElement root, out string? link)
+    {
+        // Known top-level forms:
+        // - { searchUrl: "..." }
+        // - { nextSearchUrl: "..." }
+        // - { rowLink: "..." }
+        // - { rows: "/app/dataquery/api/search/<id>/rows" }   <-- legacy 201
+        // - { searchLinks: [{ path: "...", rel: "RowsV3" }, ...] }
+        // - [ { path: "...", rel: "RowsV3" } ]
+        if (root.ValueKind == JsonValueKind.String)
+        {
+            var value = root.GetString();
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                link = value;
+                return true;
+            }
+        }
+
+        if (root.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var name in new[] { "nextSearchUrl", "searchUrl", "rowLink", "rowsLink", "rows", "path", "href", "url" })
+            {
+                var value = TryGetString(root, name);
+                if (!string.IsNullOrWhiteSpace(value) && LooksLikeSearchPath(value))
+                {
+                    link = value;
+                    return true;
+                }
+            }
+
+            foreach (var collectionName in new[] { "searchLinks", "links", "_links" })
+            {
+                if (TryGetNestedProperty(root, out var links, collectionName) &&
+                    TryExtractSearchResultLink(links, out link))
+                {
+                    return true;
+                }
+            }
+        }
+
+        if (root.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in root.EnumerateArray())
+            {
+                if (item.ValueKind == JsonValueKind.String)
+                {
+                    var value = item.GetString();
+                    if (!string.IsNullOrWhiteSpace(value) && LooksLikeSearchPath(value))
+                    {
+                        link = value;
+                        return true;
+                    }
+                }
+
+                if (item.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (var name in new[] { "path", "href", "url", "rowLink", "rows" })
+                    {
+                        var value = TryGetString(item, name);
+                        if (!string.IsNullOrWhiteSpace(value) && LooksLikeSearchPath(value))
+                        {
+                            link = value;
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        link = null;
+        return false;
+    }
+
+    private static bool LooksLikeSearchPath(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        return value.Contains("/search/", StringComparison.OrdinalIgnoreCase) ||
+               value.Contains("/dataquery/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TryGetNestedProperty(JsonElement element, out JsonElement value, params string[] path)
+    {
+        value = element;
+        foreach (var segment in path)
+        {
+            if (!TryGetPropertyCaseInsensitive(value, segment, out value))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool TryGetPropertyCaseInsensitive(JsonElement element, string propertyName, out JsonElement value)
+    {
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            value = default;
+            return false;
+        }
+
+        foreach (var property in element.EnumerateObject())
+        {
+            if (property.Name.Equals(propertyName, StringComparison.OrdinalIgnoreCase))
+            {
+                value = property.Value;
+                return true;
+            }
+        }
+
+        value = default;
+        return false;
+    }
+
+    private static string? TryGetString(JsonElement element, string propertyName)
+    {
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        if (!TryGetPropertyCaseInsensitive(element, propertyName, out var prop))
+        {
+            return null;
+        }
+
+        return prop.ValueKind == JsonValueKind.String ? prop.GetString() : null;
+    }
+
+    /// <summary>Minimal ordered set - avoids pulling in a package or taking a dependency on .NET 9.</summary>
+    private sealed class LinkedHashSet
+    {
+        private readonly HashSet<string> _seen = new(StringComparer.Ordinal);
+        public List<string> Items { get; } = new();
+
+        public void Add(string value)
+        {
+            if (_seen.Add(value))
+            {
+                Items.Add(value);
+            }
+        }
     }
 
     public async Task<VaronisSearchResponse> GetSearchResultsAsync(
@@ -235,9 +611,13 @@ public sealed class VaronisApiClient : IVaronisApiClient
             return requestMessage;
         }, cancellationToken);
 
-        response.EnsureSuccessStatusCode();
-        var payload = await response.Content.ReadFromJsonAsync<VaronisSearchResponse>(JsonDefaults.SerializerOptions, cancellationToken);
-        return payload ?? new VaronisSearchResponse();
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            throw CreateSearchRequestException(response.StatusCode, errorBody, "pagination");
+        }
+
+        return await ParseSearchResponseAsync(response, "pagination", cancellationToken);
     }
 
     private async Task<HttpResponseMessage> SendWithRetryAsync(
@@ -289,6 +669,8 @@ public sealed class VaronisApiClient : IVaronisApiClient
 
     internal Uri BuildSearchUri(string searchUrl)
     {
+        searchUrl = searchUrl.Trim();
+
         if (Uri.TryCreate(searchUrl, UriKind.Absolute, out var absoluteUri))
         {
             var baseUri = _httpClient.BaseAddress;
@@ -309,6 +691,28 @@ public sealed class VaronisApiClient : IVaronisApiClient
         if (searchUrl.StartsWith('/'))
         {
             return new Uri(searchUrl, UriKind.Relative);
+        }
+
+        if (searchUrl.StartsWith("app/", StringComparison.OrdinalIgnoreCase))
+        {
+            return new Uri($"/{searchUrl}", UriKind.Relative);
+        }
+
+        if (searchUrl.StartsWith("dataquery/", StringComparison.OrdinalIgnoreCase))
+        {
+            return new Uri($"/app/{searchUrl}", UriKind.Relative);
+        }
+
+        var appDataQueryIndex = searchUrl.IndexOf("/app/dataquery/", StringComparison.OrdinalIgnoreCase);
+        if (appDataQueryIndex >= 0)
+        {
+            return new Uri(searchUrl[appDataQueryIndex..], UriKind.Relative);
+        }
+
+        var dataQueryIndex = searchUrl.IndexOf("dataquery/api/search/", StringComparison.OrdinalIgnoreCase);
+        if (dataQueryIndex >= 0)
+        {
+            return new Uri($"/app/{searchUrl[dataQueryIndex..]}", UriKind.Relative);
         }
 
         return new Uri($"/app/dataquery/api/search/{searchUrl.TrimStart('/')}", UriKind.Relative);

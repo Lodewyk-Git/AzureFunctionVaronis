@@ -50,6 +50,15 @@ jobs:
         shell: pwsh
         run: ./scripts/Build-Package.ps1 -Configuration Release
 
+      - name: Verify package layout and function metadata
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem -Path functionapp/packages -Filter "*.zip" | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+          if ($null -eq $zip) { throw "No package zip found under functionapp/packages." }
+          ./scripts/Verify-FunctionPackage.ps1 `
+            -PackagePath $zip.FullName `
+            -ExpectedFunctionNames @("HealthCheck", "VaronisAlertTimerFunction") | Out-Null
+
       - name: Prepare release assets
         id: assets
         shell: bash

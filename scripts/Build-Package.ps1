@@ -38,6 +38,7 @@ $publishPath = Join-Path $artifactRoot "publish/$Version"
 $outputPath = Join-Path $repoRoot $OutputDirectory
 $manifestPath = Join-Path $repoRoot "functionapp/manifests/$Version.json"
 $latestManifestPath = Join-Path $repoRoot "functionapp/manifests/latest.json"
+$verifyPackageScript = Join-Path $PSScriptRoot "Verify-FunctionPackage.ps1"
 
 New-Item -ItemType Directory -Path $publishPath -Force | Out-Null
 New-Item -ItemType Directory -Path $outputPath -Force | Out-Null
@@ -67,24 +68,11 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
     [System.IO.Compression.CompressionLevel]::Optimal,
     $false)
 
-$azureFunctionsEntryFound = $false
-$zipToInspect = [System.IO.Compression.ZipFile]::OpenRead($zipFilePath)
-try {
-    foreach ($entry in $zipToInspect.Entries) {
-        if ($entry.FullName.StartsWith('.azurefunctions/', [StringComparison]::OrdinalIgnoreCase) -or
-            $entry.FullName.Equals('.azurefunctions', [StringComparison]::OrdinalIgnoreCase)) {
-            $azureFunctionsEntryFound = $true
-            break
-        }
-    }
-}
-finally {
-    $zipToInspect.Dispose()
+if (-not (Test-Path -LiteralPath $verifyPackageScript)) {
+    throw "Package verification script not found: $verifyPackageScript"
 }
 
-if (-not $azureFunctionsEntryFound) {
-    throw "Package at $zipFilePath is missing the '.azurefunctions' folder at zip root. The Functions host will report '0 functions found' without it."
-}
+& $verifyPackageScript -PackagePath $zipFilePath | Out-Null
 
 $hash = Get-FileHash -Path $zipFilePath -Algorithm SHA256
 $hashFilePath = "$zipFilePath.sha256"

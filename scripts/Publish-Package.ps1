@@ -23,7 +23,17 @@ param(
 
     [string]$SlotName = "",
 
-    [string]$SubscriptionId = ""
+    [string]$SubscriptionId = "",
+
+    [string[]]$ExpectedFunctionNames = @("HealthCheck", "VaronisAlertTimerFunction"),
+
+    [string]$ValidationAppInsightsAppName = "",
+
+    [int]$StartupValidationWindowMinutes = 30,
+
+    [switch]$SkipPackageVerification,
+
+    [switch]$SkipPostRolloutValidation
 )
 
 $ErrorActionPreference = "Stop"
@@ -36,11 +46,66 @@ if (-not (Test-Path -LiteralPath $PackagePath)) {
     throw "Package file not found: $PackagePath"
 }
 
+$verifyPackageScript = Join-Path $PSScriptRoot "Verify-FunctionPackage.ps1"
+$healthCheckScript = Join-Path $PSScriptRoot "Test-FunctionAppHealth.ps1"
+
+if (-not $SkipPackageVerification) {
+    if (-not (Test-Path -LiteralPath $verifyPackageScript)) {
+        throw "Package verification script not found: $verifyPackageScript"
+    }
+
+    & $verifyPackageScript -PackagePath $PackagePath -ExpectedFunctionNames $ExpectedFunctionNames | Out-Null
+}
+
 if ([string]::IsNullOrWhiteSpace($PackageVersion)) {
     $PackageVersion = [IO.Path]::GetFileNameWithoutExtension($PackagePath)
 }
 
 $blobName = [IO.Path]::GetFileName($PackagePath)
+$subscriptionScopeArgs = @()
+if (-not [string]::IsNullOrWhiteSpace($SubscriptionId)) {
+    $subscriptionScopeArgs = @("--subscription", $SubscriptionId)
+}
+
+function Invoke-PostRolloutValidation {
+    param(
+        [Parameter(Mandatory = $true)][string]$ResourceGroup,
+        [Parameter(Mandatory = $true)][string]$AppName
+    )
+
+    if ($SkipPostRolloutValidation) {
+        return
+    }
+
+    if (-not (Test-Path -LiteralPath $healthCheckScript)) {
+        throw "Post-rollout validation script not found: $healthCheckScript"
+    }
+
+    $healthArgs = @(
+        "-ResourceGroupName", $ResourceGroup,
+        "-FunctionAppName", $AppName,
+        "-ExpectedFunctionNames",
+        "-SyncTriggers",
+        "-FailOnWarnings",
+        "-StrictStartupValidation",
+        "-StartupWindowMinutes", $StartupValidationWindowMinutes
+    )
+
+    $healthArgs += $ExpectedFunctionNames
+
+    if (-not [string]::IsNullOrWhiteSpace($SubscriptionId)) {
+        $healthArgs += @("-SubscriptionId", $SubscriptionId)
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($ValidationAppInsightsAppName)) {
+        $healthArgs += @("-AppInsightsAppName", $ValidationAppInsightsAppName)
+    }
+
+    & $healthCheckScript @healthArgs | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Post-rollout validation failed for '$AppName'. Check Test-FunctionAppHealth output."
+    }
+}
 
 az storage container create `
     --account-name $PackageStorageAccountName `
@@ -88,6 +153,8 @@ if ($DeploymentMode -eq "ZipDeploy") {
     }
 
     az @appSettingsArgs | Out-Null
+
+    Invoke-PostRolloutValidation -ResourceGroup $ResourceGroupName -AppName $FunctionAppName
 
     [pscustomobject]@{
         DeploymentMode = $DeploymentMode
@@ -155,6 +222,8 @@ if (-not [string]::IsNullOrWhiteSpace($SlotName)) {
     $restartArgs += @("--slot", $SlotName)
 }
 az @restartArgs | Out-Null
+
+Invoke-PostRolloutValidation -ResourceGroup $ResourceGroupName -AppName $FunctionAppName
 
 [pscustomobject]@{
     DeploymentMode = $DeploymentMode

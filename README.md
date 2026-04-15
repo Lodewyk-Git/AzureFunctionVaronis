@@ -199,6 +199,22 @@ For ZipDeploy rollback, redeploy a prior known-good package via `Deploy-Solution
     -ResourceGroupName <rg> `
     -FunctionAppName <app>
   ```
+  The rollout gate now enforces:
+  - `/api/health` returns **200** after restart.
+  - trigger sync succeeds and both expected functions are discovered.
+  - no `JsonException` from `SearchAlertsAsync` in the last 30 minutes.
+  - no terminal 400 fallback loop in the last 30 minutes.
+  - last 3 correlated scheduled runs are all successful.
+  - recent rows exist in `VaronisAlerts_CL` (or configured table) and meet minimum expected volume.
+  - no startup exceptions since the last deployment window.
+
+- **Pre-rollout package verification** (before tagging/deploying):
+  ```powershell
+  ./scripts/Verify-FunctionPackage.ps1 `
+    -PackagePath functionapp/packages/<zip> `
+    -ExpectedFunctionNames @("HealthCheck", "VaronisAlertTimerFunction")
+  ```
+  This explicitly validates `host.json` at zip root, `.azurefunctions` at zip root, and function metadata/script presence in the package.
 - **Alerts** (deployed by `infra/modules/alerts.bicep`):
   - `<prefix>-<env>-func-failures` — metric alert on `FunctionExecutionCount` with `Status=Failed`.
   - `<prefix>-<env>-no-ingestion` — scheduled query alert when the destination table has no rows in the evaluation window.
@@ -222,6 +238,10 @@ For ZipDeploy rollback, redeploy a prior known-good package via `Deploy-Solution
 | App starts then idles, no invocations | `WEBSITE_RUN_FROM_PACKAGE` URL returns 404 | Test the URL with `curl -I`; check SAS expiry |
 | Timer never fires | `TimerSchedule` missing or malformed NCRONTAB | `az functionapp config appsettings list` |
 | Table exists but appears empty after deploy | Legacy classic table still in `Classic` sub-type | Check `Invoke-TableLifecycle.ps1` output; `MigrationVerified` must be `true` |
+
+### Assumptions
+
+- Varonis legacy search response shape is stable enough to be handled by tolerant parsing logic in `VaronisApiClient`; if the tenant introduces a materially new schema, a dedicated endpoint-specific parser may still be required.
 
 ## CI/CD
 Workflow: [.github/workflows/ci-cd.yml](.github/workflows/ci-cd.yml)
