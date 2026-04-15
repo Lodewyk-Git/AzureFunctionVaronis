@@ -10,15 +10,18 @@ using Varonis.Sentinel.Functions.Options;
 using Varonis.Sentinel.Functions.Services;
 
 var host = new HostBuilder()
-    .ConfigureFunctionsWorkerDefaults()
+    .ConfigureFunctionsWorkerDefaults(builder =>
+    {
+        // Route worker telemetry + ILogger output to Application Insights.
+        // Connection string is supplied via APPLICATIONINSIGHTS_CONNECTION_STRING app setting (see infra/modules/core.bicep).
+        builder.AddApplicationInsights();
+        builder.AddApplicationInsightsLogger();
+    })
     .ConfigureServices((context, services) =>
     {
         var configuration = context.Configuration;
 
-        // Route worker ILogger output to Application Insights.
-        // Connection string is supplied via APPLICATIONINSIGHTS_CONNECTION_STRING app setting (see infra/modules/core.bicep).
         services.AddApplicationInsightsTelemetryWorkerService();
-        services.ConfigureFunctionsApplicationInsights();
 
         services
             .AddOptions<VaronisOptions>()
