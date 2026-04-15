@@ -2,6 +2,7 @@ using Azure.Core;
 using Azure.Identity;
 using Azure.Monitor.Ingestion;
 using Azure.Storage.Blobs;
+using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -29,6 +30,17 @@ var host = new HostBuilder()
             {
                 options.Rules.Remove(toRemove);
             }
+        });
+
+        // Tell the Functions host that the worker is shipping its own logs to AI, so the host
+        // does not also forward worker logs through its own AI pipeline. Without this flag, every
+        // structured log line appears twice in App Insights (once host-side, once worker-side).
+        // This is the same capability flag that Microsoft.Azure.Functions.Worker.ApplicationInsights
+        // sets via ConfigureFunctionsApplicationInsights() - we set it directly to avoid taking a
+        // dependency on a package whose API surface keeps shifting between 1.x and 2.x.
+        services.Configure<WorkerOptions>(workerOptions =>
+        {
+            workerOptions.Capabilities["WorkerApplicationInsightsLoggingEnabled"] = bool.TrueString;
         });
 
         services
