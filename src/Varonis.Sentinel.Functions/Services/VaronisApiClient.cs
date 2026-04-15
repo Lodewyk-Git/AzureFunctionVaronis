@@ -195,6 +195,18 @@ public sealed class VaronisApiClient : IVaronisApiClient
         // so send the legacy shape directly. We keep the modern fallback in case we're
         // ever pointed at a newer endpoint that prefers the other way round.
         var legacyRequest = BuildLegacySearchRequest(request);
+
+        // Log the outbound payload once per run so the actual filter shape (Alert.TimeUTC bounds,
+        // severity/status IDs, AggregationFilter) is queryable in App Insights traces. This is the
+        // single most useful diagnostic when Varonis returns "0 rows" - it's almost always a filter
+        // that's tighter than expected.
+        var legacyRequestBody = JsonSerializer.Serialize(legacyRequest, JsonDefaults.SerializerOptions);
+        _logger.LogInformation(
+            "Varonis search request prepared. PayloadKind=legacy, FromUtc={FromUtc}, ToUtc={ToUtc}, RequestBody={RequestBody}",
+            request.FromUtc,
+            request.ToUtc,
+            Truncate(legacyRequestBody, ErrorBodyLogLimit));
+
         using var legacyResponse = await SendWithRetryAsync(() =>
         {
             var requestMessage = new HttpRequestMessage(HttpMethod.Post, _options.SearchPath);
@@ -656,6 +668,18 @@ public sealed class VaronisApiClient : IVaronisApiClient
         }
     }
 
+    // Varonis async search: GET /rows can return 304 either because the search is still building
+    // (POST /search returns 201 immediately and queues the search) or because the search produced
+    // zero rows. We can't distinguish these without polling. Try a few times with backoff before
+    // accepting "no rows" as the final answer.
+    private static readonly TimeSpan[] RowsPollDelays =
+    [
+        TimeSpan.FromSeconds(1),
+        TimeSpan.FromSeconds(2),
+        TimeSpan.FromSeconds(4),
+        TimeSpan.FromSeconds(8)
+    ];
+
     public async Task<VaronisSearchResponse> GetSearchResultsAsync(
         string accessToken,
         string searchUrl,
@@ -666,38 +690,62 @@ public sealed class VaronisApiClient : IVaronisApiClient
             throw new ArgumentException("searchUrl cannot be null or empty.", nameof(searchUrl));
         }
 
-        using var response = await SendWithRetryAsync(() =>
+        var attempt = 0;
+        while (true)
         {
-            var requestMessage = new HttpRequestMessage(HttpMethod.Get, BuildSearchUri(searchUrl));
-            requestMessage.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-            return requestMessage;
-        }, cancellationToken);
+            using var response = await SendWithRetryAsync(() =>
+            {
+                var requestMessage = new HttpRequestMessage(HttpMethod.Get, BuildSearchUri(searchUrl));
+                requestMessage.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+                return requestMessage;
+            }, cancellationToken);
 
-        // Varonis returns 304 Not Modified on the rows endpoint when the async search completed
-        // with zero matching rows for the supplied window. Treat as empty success — the timer
-        // function will then advance the checkpoint normally instead of failing the run.
-        if (response.StatusCode == HttpStatusCode.NotModified ||
-            response.StatusCode == HttpStatusCode.NoContent)
-        {
-            _logger.LogInformation(
-                "Varonis pagination GET returned {StatusCode}; treating as empty result. SearchUrl={SearchUrl}",
-                (int)response.StatusCode,
-                searchUrl);
-            return new VaronisSearchResponse();
+            // 204 = empty rows definitively. Accept immediately.
+            if (response.StatusCode == HttpStatusCode.NoContent)
+            {
+                _logger.LogInformation(
+                    "Varonis pagination GET returned 204 No Content; accepting as empty result. SearchUrl={SearchUrl}",
+                    searchUrl);
+                return new VaronisSearchResponse();
+            }
+
+            // 304 = ambiguous (still building or genuinely empty). Poll with backoff.
+            if (response.StatusCode == HttpStatusCode.NotModified)
+            {
+                if (attempt < RowsPollDelays.Length)
+                {
+                    var delay = RowsPollDelays[attempt];
+                    _logger.LogInformation(
+                        "Varonis pagination GET returned 304 (attempt {Attempt}/{MaxAttempts}). Waiting {Delay} for async search to complete. SearchUrl={SearchUrl}",
+                        attempt + 1,
+                        RowsPollDelays.Length + 1,
+                        delay,
+                        searchUrl);
+                    await Task.Delay(delay, cancellationToken);
+                    attempt++;
+                    continue;
+                }
+
+                _logger.LogInformation(
+                    "Varonis pagination GET still 304 after {MaxAttempts} attempts; treating as empty result. SearchUrl={SearchUrl}",
+                    RowsPollDelays.Length + 1,
+                    searchUrl);
+                return new VaronisSearchResponse();
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+                _logger.LogError(
+                    "Varonis pagination GET returned non-success {StatusCode}. SearchUrl={SearchUrl}, ResponseBody={ResponseBody}",
+                    (int)response.StatusCode,
+                    searchUrl,
+                    Truncate(errorBody, ErrorBodyLogLimit));
+                throw CreateSearchRequestException(response.StatusCode, errorBody, "pagination");
+            }
+
+            return await ParseSearchResponseAsync(response, "pagination", cancellationToken);
         }
-
-        if (!response.IsSuccessStatusCode)
-        {
-            var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
-            _logger.LogError(
-                "Varonis pagination GET returned non-success {StatusCode}. SearchUrl={SearchUrl}, ResponseBody={ResponseBody}",
-                (int)response.StatusCode,
-                searchUrl,
-                Truncate(errorBody, ErrorBodyLogLimit));
-            throw CreateSearchRequestException(response.StatusCode, errorBody, "pagination");
-        }
-
-        return await ParseSearchResponseAsync(response, "pagination", cancellationToken);
     }
 
     private async Task<HttpResponseMessage> SendWithRetryAsync(
