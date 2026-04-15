@@ -5,25 +5,31 @@ using Azure.Storage.Blobs;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Varonis.Sentinel.Functions.Options;
 using Varonis.Sentinel.Functions.Services;
 
 var host = new HostBuilder()
-    // Two-arg overload targets IFunctionsWorkerApplicationBuilder (the single-arg overload binds WorkerOptions,
-    // which does not expose the AI extensions we need).
-    .ConfigureFunctionsWorkerDefaults((hostContext, workerAppBuilder) =>
-    {
-        // Route worker telemetry + ILogger output to Application Insights.
-        // Connection string is supplied via APPLICATIONINSIGHTS_CONNECTION_STRING app setting (see infra/modules/core.bicep).
-        workerAppBuilder.AddApplicationInsights();
-        workerAppBuilder.AddApplicationInsightsLogger();
-    })
+    .ConfigureFunctionsWorkerDefaults()
     .ConfigureServices((context, services) =>
     {
         var configuration = context.Configuration;
 
+        // Route worker ILogger output to Application Insights via the standard WorkerService AI pipeline.
+        // Connection string is supplied through APPLICATIONINSIGHTS_CONNECTION_STRING (see infra/modules/core.bicep).
+        // The AI log provider installs its own filter that defaults to Warning; lift it to Information
+        // so our structured ingestion traces reach App Insights.
         services.AddApplicationInsightsTelemetryWorkerService();
+        services.Configure<LoggerFilterOptions>(options =>
+        {
+            var toRemove = options.Rules.FirstOrDefault(rule =>
+                rule.ProviderName == "Microsoft.Extensions.Logging.ApplicationInsights.ApplicationInsightsLoggerProvider");
+            if (toRemove is not null)
+            {
+                options.Rules.Remove(toRemove);
+            }
+        });
 
         services
             .AddOptions<VaronisOptions>()
