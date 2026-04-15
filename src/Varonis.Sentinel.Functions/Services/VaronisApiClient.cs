@@ -487,6 +487,45 @@ public sealed class VaronisApiClient : IVaronisApiClient
 
         if (root.ValueKind == JsonValueKind.Array)
         {
+            // First pass: prefer an entry that explicitly identifies itself as the rows link
+            // (Varonis async-search handoff: [{location, dataType: "rows"}, {location, dataType: "terminate"}, {location, dataType: "searchId"}]).
+            foreach (var item in root.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object)
+                {
+                    continue;
+                }
+
+                var dataType = TryGetString(item, "dataType")
+                    ?? TryGetString(item, "rel")
+                    ?? TryGetString(item, "type");
+                if (string.IsNullOrWhiteSpace(dataType))
+                {
+                    continue;
+                }
+
+                var isRows = dataType.Equals("rows", StringComparison.OrdinalIgnoreCase) ||
+                             dataType.StartsWith("rows", StringComparison.OrdinalIgnoreCase) ||
+                             dataType.Equals("RowsV3", StringComparison.OrdinalIgnoreCase);
+                if (!isRows)
+                {
+                    continue;
+                }
+
+                var location = TryGetString(item, "location")
+                    ?? TryGetString(item, "path")
+                    ?? TryGetString(item, "href")
+                    ?? TryGetString(item, "url")
+                    ?? TryGetString(item, "rowLink")
+                    ?? TryGetString(item, "rows");
+                if (!string.IsNullOrWhiteSpace(location))
+                {
+                    link = location;
+                    return true;
+                }
+            }
+
+            // Second pass: fall back to any string or path-like entry.
             foreach (var item in root.EnumerateArray())
             {
                 if (item.ValueKind == JsonValueKind.String)
@@ -501,7 +540,7 @@ public sealed class VaronisApiClient : IVaronisApiClient
 
                 if (item.ValueKind == JsonValueKind.Object)
                 {
-                    foreach (var name in new[] { "path", "href", "url", "rowLink", "rows" })
+                    foreach (var name in new[] { "location", "path", "href", "url", "rowLink", "rows" })
                     {
                         var value = TryGetString(item, name);
                         if (!string.IsNullOrWhiteSpace(value) && LooksLikeSearchPath(value))
