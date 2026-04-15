@@ -210,7 +210,9 @@ function Invoke-AppInsightsQuery {
         [Parameter(Mandatory = $true)][string]$AppIdentifier,
         [Parameter(Mandatory = $true)][string]$ResourceGroup,
         [Parameter(Mandatory = $true)][string]$QueryText,
-        [Parameter(Mandatory = $true)][string[]]$SubscriptionArgs
+        # AllowEmptyCollection: when -SubscriptionId is omitted at the script entry point,
+        # the caller passes an empty array. Mandatory + [string[]] alone rejects that.
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$SubscriptionArgs
     )
 
     $normalizedQuery = (($QueryText -replace "`r", " ") -replace "`n", " ").Trim()
