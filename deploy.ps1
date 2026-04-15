@@ -18,7 +18,9 @@ param(
 
     [string]$TableName = "VaronisAlerts_CL",
 
-    [string]$VaronisBaseUrl = "",
+    [Parameter(Mandatory = $true)]
+    [ValidatePattern('^https?://')]
+    [string]$VaronisBaseUrl,
 
     [SecureString]$VaronisApiKey,
 

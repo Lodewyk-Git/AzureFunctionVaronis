@@ -23,7 +23,9 @@ param(
 
     [string]$TimerSchedule = "0 */5 * * * *",
 
-    [string]$VaronisBaseUrl = "",
+    [Parameter(Mandatory = $true)]
+    [ValidatePattern('^https?://')]
+    [string]$VaronisBaseUrl,
 
     [SecureString]$VaronisApiKey,
 
@@ -281,18 +283,31 @@ $settings = @(
     "TABLE_NAME=$resolvedTableName",
     "DCR_RESOURCE_ID=$dcrResourceId",
     "WORKSPACE_RESOURCE_ID=$workspaceResourceIdResolved",
+    "Varonis__BaseUrl=$VaronisBaseUrl",
     "Varonis__ApiKeySecretName=$VaronisApiKeySecretName"
 )
-
-if (-not [string]::IsNullOrWhiteSpace($VaronisBaseUrl)) {
-    $settings += "Varonis__BaseUrl=$VaronisBaseUrl"
-}
 
 az functionapp config appsettings set `
     --resource-group $ResourceGroupName `
     --name $functionAppName `
     --settings $settings `
     --only-show-errors | Out-Null
+
+# Fail-fast check: confirm the four required runtime settings actually landed.
+# This catches cases where the Function App was pre-existing with restricted RBAC
+# or the appsettings set command partially succeeded.
+$configured = az functionapp config appsettings list `
+    --resource-group $ResourceGroupName `
+    --name $functionAppName `
+    --query "[?name=='Varonis__BaseUrl' || name=='Ingestion__Endpoint' || name=='Ingestion__DcrImmutableId' || name=='Ingestion__StreamName'].name" `
+    --output tsv `
+    --only-show-errors
+
+$required = @('Varonis__BaseUrl', 'Ingestion__Endpoint', 'Ingestion__DcrImmutableId', 'Ingestion__StreamName')
+$missing = $required | Where-Object { ($configured -split "`n") -notcontains $_ }
+if ($missing.Count -gt 0) {
+    throw "The following app settings did not apply on '$functionAppName': $($missing -join ', '). Check deployment permissions and rerun Deploy-Solution.ps1."
+}
 
 $packagePublishResult = $null
 if (-not $SkipPackagePublish) {
