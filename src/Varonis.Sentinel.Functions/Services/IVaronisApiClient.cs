@@ -15,4 +15,14 @@ public interface IVaronisApiClient
         string accessToken,
         string searchUrl,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Best-effort POST to the Varonis async-search terminate URL after pagination completes,
+    /// so the search does not idle on the server side until natural expiry. Failures are logged
+    /// but never propagated - terminate is housekeeping, not part of the ingestion contract.
+    /// </summary>
+    Task TryTerminateSearchAsync(
+        string accessToken,
+        string terminateUrl,
+        CancellationToken cancellationToken = default);
 }

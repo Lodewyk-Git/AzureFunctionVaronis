@@ -19,4 +19,12 @@ public sealed class VaronisSearchResponse
 
     [JsonPropertyName("rows")]
     public List<List<JsonElement>> Rows { get; init; } = new();
+
+    /// <summary>
+    /// Server-side cleanup URL returned by Varonis async-search handoff
+    /// (e.g. v2/search/{searchId}/terminate/). Not part of the wire contract;
+    /// populated by the client when the handoff array carries a {dataType:"terminate"} entry.
+    /// </summary>
+    [JsonIgnore]
+    public string? TerminateUrl { get; init; }
 }

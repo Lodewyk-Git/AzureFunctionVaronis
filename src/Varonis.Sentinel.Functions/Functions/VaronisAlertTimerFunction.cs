@@ -90,6 +90,10 @@ public sealed class VaronisAlertTimerFunction
         var page = await _varonisApiClient.SearchAlertsAsync(accessToken, searchRequest, cancellationToken);
         AddMappedAlerts(page, allAlerts, correlationId, searchRequest.MaxResults);
 
+        // Capture terminate URL from the handoff response so we can clean up the async search
+        // server-side after pagination completes (Varonis only returns this on the initial 201).
+        var terminateUrl = page.TerminateUrl;
+
         var nextSearchUrl = ResolveNextSearchUrl(page);
         var safetyPageLimit = 500;
         var pagesRead = 0;
@@ -102,6 +106,14 @@ public sealed class VaronisAlertTimerFunction
             AddMappedAlerts(page, allAlerts, correlationId, searchRequest.MaxResults);
             nextSearchUrl = ResolveNextSearchUrl(page);
             pagesRead++;
+        }
+
+        // Best-effort cleanup of the server-side search regardless of whether rows came back.
+        // TryTerminateSearchAsync swallows its own exceptions and only logs - the timer run is
+        // already a success at this point.
+        if (!string.IsNullOrWhiteSpace(terminateUrl))
+        {
+            await _varonisApiClient.TryTerminateSearchAsync(accessToken, terminateUrl, cancellationToken);
         }
 
         return allAlerts

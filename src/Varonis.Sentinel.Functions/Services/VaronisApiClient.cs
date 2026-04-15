@@ -315,11 +315,15 @@ public sealed class VaronisApiClient : IVaronisApiClient
 
         if (TryExtractSearchResultLink(root, out var searchResultLink))
         {
+            // Same scan also extracts the terminate URL when present, so the timer function can
+            // close the search server-side after pagination completes.
+            TryExtractTerminateLink(root, out var terminateLink);
             return new VaronisSearchResponse
             {
                 SearchUrl = searchResultLink,
                 NextSearchUrl = searchResultLink,
-                HasMore = true
+                HasMore = true,
+                TerminateUrl = terminateLink
             };
         }
 
@@ -603,6 +607,49 @@ public sealed class VaronisApiClient : IVaronisApiClient
                value.Contains("/dataquery/", StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Looks for the "terminate" entry in a Varonis async-search handoff array. Mirror of
+    /// TryExtractSearchResultLink but matches dataType == "terminate" (or rel/type variants).
+    /// Returns false silently if the response shape doesn't carry a terminate URL - it's optional.
+    /// </summary>
+    private static bool TryExtractTerminateLink(JsonElement root, out string? link)
+    {
+        link = null;
+        if (root.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        foreach (var item in root.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            var dataType = TryGetString(item, "dataType")
+                ?? TryGetString(item, "rel")
+                ?? TryGetString(item, "type");
+            if (string.IsNullOrWhiteSpace(dataType) ||
+                !dataType.Equals("terminate", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var location = TryGetString(item, "location")
+                ?? TryGetString(item, "path")
+                ?? TryGetString(item, "href")
+                ?? TryGetString(item, "url");
+            if (!string.IsNullOrWhiteSpace(location))
+            {
+                link = location;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static bool TryGetNestedProperty(JsonElement element, out JsonElement value, params string[] path)
     {
         value = element;
@@ -745,6 +792,51 @@ public sealed class VaronisApiClient : IVaronisApiClient
             }
 
             return await ParseSearchResponseAsync(response, "pagination", cancellationToken);
+        }
+    }
+
+    public async Task TryTerminateSearchAsync(
+        string accessToken,
+        string terminateUrl,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(terminateUrl))
+        {
+            return;
+        }
+
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, BuildSearchUri(terminateUrl));
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+            // Some tenants require an explicit empty body on this endpoint; send one to be safe.
+            request.Content = new StringContent(string.Empty);
+
+            using var response = await _httpClient.SendAsync(request, cancellationToken);
+            if (response.IsSuccessStatusCode)
+            {
+                _logger.LogInformation(
+                    "Varonis search terminated. TerminateUrl={TerminateUrl}, StatusCode={StatusCode}",
+                    terminateUrl,
+                    (int)response.StatusCode);
+                return;
+            }
+
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            _logger.LogWarning(
+                "Varonis terminate POST returned non-success {StatusCode}. TerminateUrl={TerminateUrl}, ResponseBody={ResponseBody}",
+                (int)response.StatusCode,
+                terminateUrl,
+                Truncate(body, ErrorBodyLogLimit));
+        }
+        catch (Exception ex)
+        {
+            // Best-effort cleanup. The search will eventually expire on the Varonis side; we never
+            // fail the timer run because we couldn't close it ourselves.
+            _logger.LogWarning(
+                ex,
+                "Varonis terminate POST threw. Run continues. TerminateUrl={TerminateUrl}",
+                terminateUrl);
         }
     }
 
