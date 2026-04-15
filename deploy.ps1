@@ -10,7 +10,7 @@ param(
 
     [string]$NamePrefix = "varonis",
 
-    [string]$OwnerEmail = "Lood@buisecops.co.za",
+    [string]$OwnerEmail = "owner@example.com",
 
     [string]$WorkspaceResourceId = "",
 

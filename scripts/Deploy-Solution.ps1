@@ -11,7 +11,7 @@ param(
 
     [string]$NamePrefix = "varonis",
 
-    [string]$OwnerEmail = "Lood@buisecops.co.za",
+    [string]$OwnerEmail = "owner@example.com",
 
     [string]$WorkspaceResourceId = "",
 
@@ -41,6 +41,12 @@ param(
     [switch]$SkipPackagePublish,
 
     [switch]$RunValidation,
+
+    [string]$AlertActionGroupResourceId = "",
+
+    [switch]$AlertsDisabled,
+
+    [switch]$SkipAlerts,
 
     [string]$SubscriptionId = ""
 )
@@ -140,6 +146,7 @@ $WorkspaceResourceId = Resolve-SentinelWorkspaceResourceId `
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $coreTemplate = Join-Path $repoRoot "infra/modules/core.bicep"
 $monitoringTemplate = Join-Path $repoRoot "infra/modules/monitoring.bicep"
+$alertsTemplate = Join-Path $repoRoot "infra/modules/alerts.bicep"
 $tableLifecycleScript = Join-Path $PSScriptRoot "Invoke-TableLifecycle.ps1"
 $buildPackageScript = Join-Path $PSScriptRoot "Build-Package.ps1"
 $publishPackageScript = Join-Path $PSScriptRoot "Publish-Package.ps1"
@@ -237,6 +244,36 @@ $dcrImmutableId = Get-OutputValue -Outputs $monitoringOutputs -Name "dcrImmutabl
 $dcrResourceId = Get-OutputValue -Outputs $monitoringOutputs -Name "dcrResourceId"
 $logsIngestionEndpoint = Get-OutputValue -Outputs $monitoringOutputs -Name "logsIngestionEndpoint"
 
+$alertsResult = $null
+if (-not $SkipAlerts) {
+    $functionAppResourceId = Get-OutputValue -Outputs $coreOutputs -Name "functionAppResourceId"
+    $alertsDisabledValue = if ($AlertsDisabled) { "true" } else { "false" }
+
+    $alertsOutputsRaw = az deployment group create `
+        --resource-group $ResourceGroupName `
+        --name "$NamePrefix-$EnvironmentName-alerts-$(Get-Date -Format 'yyyyMMddHHmmss')" `
+        --template-file $alertsTemplate `
+        --parameters `
+            location=$Location `
+            environmentName=$EnvironmentName `
+            namePrefix=$NamePrefix `
+            ownerEmail=$OwnerEmail `
+            functionAppResourceId=$functionAppResourceId `
+            workspaceResourceId=$workspaceResourceIdResolved `
+            tableName=$resolvedTableName `
+            actionGroupResourceId=$AlertActionGroupResourceId `
+            alertsDisabled=$alertsDisabledValue `
+        --query "properties.outputs" `
+        --output json `
+        --only-show-errors
+
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($alertsOutputsRaw)) {
+        throw "Alerts deployment failed."
+    }
+
+    $alertsResult = $alertsOutputsRaw | ConvertFrom-Json
+}
+
 $settings = @(
     "Ingestion__Endpoint=$logsIngestionEndpoint",
     "Ingestion__DcrImmutableId=$dcrImmutableId",
@@ -300,5 +337,6 @@ if ($RunValidation) {
     DcrImmutableId = $dcrImmutableId
     DcrResourceId = $dcrResourceId
     LogsIngestionEndpoint = $logsIngestionEndpoint
+    Alerts = $alertsResult
     Package = $packagePublishResult
 }

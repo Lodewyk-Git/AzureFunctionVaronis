@@ -10,7 +10,7 @@ param environmentName string
 param namePrefix string = 'varonis'
 
 @description('Owner contact email used for resource tags.')
-param ownerEmail string = 'Lood@buisecops.co.za'
+param ownerEmail string = 'owner@example.com'
 
 @description('Existing Sentinel-enabled Log Analytics workspace resource ID.')
 param workspaceResourceId string
@@ -201,6 +201,8 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
       alwaysOn: false
       minTlsVersion: '1.2'
       ftpsState: 'Disabled'
+      // Platform health probe. Ignored on Consumption (Y1) but respected on Elastic Premium / Flex Consumption.
+      healthCheckPath: '/api/health'
       appSettings: [
         {
           name: 'FUNCTIONS_WORKER_RUNTIME'

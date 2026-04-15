@@ -10,7 +10,7 @@ param environmentName string
 param namePrefix string = 'varonis'
 
 @description('Owner contact email used for resource tags.')
-param ownerEmail string = 'Lood@buisecops.co.za'
+param ownerEmail string = 'owner@example.com'
 
 @description('Existing Sentinel-enabled Log Analytics workspace resource ID.')
 param workspaceResourceId string
@@ -38,6 +38,12 @@ param functionPlanSkuTier string = 'Dynamic'
 
 @description('Enable diagnostic settings.')
 param enableDiagnostics bool = true
+
+@description('Optional Action Group resource ID to receive alert notifications. If empty, alert rules are created without actions.')
+param alertActionGroupResourceId string = ''
+
+@description('Disable alert rules. Useful during bring-up to avoid noise before the first successful ingestion.')
+param alertsDisabled bool = false
 
 var tableColumns = [
   {
@@ -126,6 +132,24 @@ module monitoring './modules/monitoring.bicep' = {
   }
 }
 
+module alerts './modules/alerts.bicep' = {
+  name: 'alertsDeployment'
+  params: {
+    location: location
+    environmentName: environmentName
+    namePrefix: namePrefix
+    ownerEmail: ownerEmail
+    functionAppResourceId: core.outputs.functionAppResourceId
+    workspaceResourceId: core.outputs.workspaceResourceId
+    tableName: tableName
+    actionGroupResourceId: alertActionGroupResourceId
+    alertsDisabled: alertsDisabled
+  }
+  dependsOn: [
+    monitoring
+  ]
+}
+
 output functionAppName string = core.outputs.functionAppName
 output functionAppResourceId string = core.outputs.functionAppResourceId
 output packageStorageAccountName string = core.outputs.packageStorageAccountName
@@ -140,3 +164,6 @@ output dceResourceId string = monitoring.outputs.dceResourceId
 output logsIngestionEndpoint string = monitoring.outputs.logsIngestionEndpoint
 output tableOutputName string = monitoring.outputs.tableName
 output streamOutputName string = monitoring.outputs.streamName
+output functionFailureAlertId string = alerts.outputs.functionFailureAlertId
+output noIngestionAlertId string = alerts.outputs.noIngestionAlertId
+output dcrErrorAlertId string = alerts.outputs.dcrErrorAlertId

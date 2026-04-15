@@ -10,9 +10,14 @@ on:
   workflow_dispatch:
     inputs:
       environment_name:
-        description: "Target environment name (dev/test/prod)"
+        description: "Target environment name. Must match a configured GitHub Environment (dev/test/prod)."
         required: true
         default: "dev"
+        type: choice
+        options:
+          - dev
+          - test
+          - prod
       resource_group:
         description: "Azure resource group name"
         required: true
@@ -36,6 +41,11 @@ permissions:
   id-token: write
   contents: read
 
+# Serialize deploys per environment to avoid racing Bicep + table-lifecycle operations.
+concurrency:
+  group: ci-cd-${{ github.event.inputs.environment_name || github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build-package:
     runs-on: ubuntu-latest
@@ -55,9 +65,12 @@ jobs:
       - name: Build
         run: dotnet build AzureFunctionVaronis.sln --configuration Release --no-restore
 
+      - name: Test
+        run: dotnet test AzureFunctionVaronis.sln --configuration Release --no-build --verbosity minimal
+
       - name: Build Function Package
         shell: pwsh
-        run: ./scripts/Build-Package.ps1 -Configuration Release
+        run: ./scripts/Build-Package.ps1 -Configuration Release -SkipTests
 
       - name: Upload Package Artifact
         uses: actions/upload-artifact@v4
@@ -68,9 +81,25 @@ jobs:
             functionapp/packages/*.sha256
             functionapp/manifests/*.json
 
+  # prod deploys must originate from main; dev/test may deploy from any branch.
+  guard-prod-branch:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment_name == 'prod'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce prod deploys from main
+        run: |
+          if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "::error::prod deployments must run from refs/heads/main. Got ${GITHUB_REF}."
+            exit 1
+          fi
+
   deploy-azure:
+    # guard-prod-branch is skipped for non-prod dispatches; GitHub treats skipped needs as passing,
+    # so deploy-azure still runs for dev/test while prod deploys from a non-main branch are blocked.
     if: github.event_name == 'workflow_dispatch'
-    needs: build-package
+    needs:
+      - build-package
+      - guard-prod-branch
     runs-on: ubuntu-latest
     environment: ${{ github.event.inputs.environment_name }}
     steps:

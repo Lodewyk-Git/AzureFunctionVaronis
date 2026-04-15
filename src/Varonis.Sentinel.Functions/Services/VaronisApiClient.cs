@@ -20,48 +20,90 @@ public sealed class VaronisApiClient : IVaronisApiClient
         HttpStatusCode.GatewayTimeout
     ];
 
+    // Safety skew so we refresh before the token actually expires.
+    private static readonly TimeSpan TokenExpirySkew = TimeSpan.FromSeconds(60);
+
+    // Fallback lifetime when Varonis does not return expires_in.
+    private static readonly TimeSpan DefaultTokenLifetime = TimeSpan.FromMinutes(10);
+
     private readonly HttpClient _httpClient;
     private readonly ISecretProvider _secretProvider;
+    private readonly IVaronisTokenCache _tokenCache;
     private readonly VaronisOptions _options;
     private readonly ILogger<VaronisApiClient> _logger;
 
     public VaronisApiClient(
         HttpClient httpClient,
         ISecretProvider secretProvider,
+        IVaronisTokenCache tokenCache,
         IOptions<VaronisOptions> options,
         ILogger<VaronisApiClient> logger)
     {
         _httpClient = httpClient;
         _secretProvider = secretProvider;
+        _tokenCache = tokenCache;
         _options = options.Value;
         _logger = logger;
     }
 
     public async Task<string> GetAccessTokenAsync(CancellationToken cancellationToken = default)
     {
-        var apiKey = await _secretProvider.GetVaronisApiKeyAsync(cancellationToken);
-
-        using var response = await SendWithRetryAsync(() =>
+        if (_tokenCache.TryGet(out var cached))
         {
-            var request = new HttpRequestMessage(HttpMethod.Post, _options.AuthPath);
-            request.Headers.Add("x-api-key", apiKey);
-            request.Content = new FormUrlEncodedContent(new Dictionary<string, string>
-            {
-                ["grant_type"] = "varonis_custom"
-            });
-
-            return request;
-        }, cancellationToken);
-
-        response.EnsureSuccessStatusCode();
-        var tokenResponse = await response.Content.ReadFromJsonAsync<VaronisTokenResponse>(JsonDefaults.SerializerOptions, cancellationToken);
-
-        if (tokenResponse is null || string.IsNullOrWhiteSpace(tokenResponse.AccessToken))
-        {
-            throw new InvalidOperationException("Varonis token response did not contain an access token.");
+            return cached;
         }
 
-        return tokenResponse.AccessToken;
+        await _tokenCache.RefreshLock.WaitAsync(cancellationToken);
+        try
+        {
+            // Re-check inside the lock to avoid a thundering herd after refresh.
+            if (_tokenCache.TryGet(out cached))
+            {
+                return cached;
+            }
+
+            var apiKey = await _secretProvider.GetVaronisApiKeyAsync(cancellationToken);
+
+            using var response = await SendWithRetryAsync(() =>
+            {
+                var request = new HttpRequestMessage(HttpMethod.Post, _options.AuthPath);
+                request.Headers.Add("x-api-key", apiKey);
+                request.Content = new FormUrlEncodedContent(new Dictionary<string, string>
+                {
+                    ["grant_type"] = "varonis_custom"
+                });
+
+                return request;
+            }, cancellationToken);
+
+            response.EnsureSuccessStatusCode();
+            var tokenResponse = await response.Content.ReadFromJsonAsync<VaronisTokenResponse>(JsonDefaults.SerializerOptions, cancellationToken);
+
+            if (tokenResponse is null || string.IsNullOrWhiteSpace(tokenResponse.AccessToken))
+            {
+                throw new InvalidOperationException("Varonis token response did not contain an access token.");
+            }
+
+            var lifetime = tokenResponse.ExpiresInSeconds > 0
+                ? TimeSpan.FromSeconds(tokenResponse.ExpiresInSeconds)
+                : DefaultTokenLifetime;
+
+            if (lifetime > TokenExpirySkew)
+            {
+                var expiresUtc = DateTimeOffset.UtcNow.Add(lifetime).Subtract(TokenExpirySkew);
+                _tokenCache.Set(tokenResponse.AccessToken, expiresUtc);
+                _logger.LogInformation(
+                    "Cached Varonis access token. ExpiresUtc={ExpiresUtc}, LifetimeSeconds={LifetimeSeconds}.",
+                    expiresUtc,
+                    (int)lifetime.TotalSeconds);
+            }
+
+            return tokenResponse.AccessToken;
+        }
+        finally
+        {
+            _tokenCache.RefreshLock.Release();
+        }
     }
 
     public async Task<VaronisSearchResponse> SearchAlertsAsync(

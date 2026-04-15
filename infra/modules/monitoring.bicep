@@ -10,7 +10,7 @@ param environmentName string
 param namePrefix string = 'varonis'
 
 @description('Owner contact email used for resource tags.')
-param ownerEmail string = 'Lood@buisecops.co.za'
+param ownerEmail string = 'owner@example.com'
 
 @description('Target Log Analytics workspace resource ID.')
 param workspaceResourceId string

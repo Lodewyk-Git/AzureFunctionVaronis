@@ -16,6 +16,10 @@ param(
 
     [switch]$AsJson,
 
+    [int]$MigrationVerificationTimeoutSeconds = 120,
+
+    [int]$MigrationVerificationPollSeconds = 5,
+
     [string]$SubscriptionId = ""
 )
 
@@ -177,9 +181,38 @@ function Update-TableColumns {
     }
 }
 
+function Wait-ForDcrBasedSubType {
+    param(
+        [Parameter(Mandatory = $true)][string]$TableNameValue,
+        [Parameter(Mandatory = $true)][int]$TimeoutSeconds,
+        [Parameter(Mandatory = $true)][int]$PollSeconds
+    )
+
+    if ($TimeoutSeconds -le 0) {
+        return $null
+    }
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $lastSubType = $null
+    while ((Get-Date) -lt $deadline) {
+        $current = Get-TableStrict -TableNameValue $TableNameValue
+        if ($null -ne $current) {
+            $lastSubType = $current.schema.tableSubType
+            if ($lastSubType -eq "DataCollectionRuleBased") {
+                return $current
+            }
+        }
+
+        Start-Sleep -Seconds $PollSeconds
+    }
+
+    throw "Table '$TableNameValue' is still not DataCollectionRuleBased after $TimeoutSeconds seconds (last observed tableSubType='$lastSubType'). The migration did not complete; do NOT proceed to DCR deployment."
+}
+
 $resolvedTableName = $TableName
 $created = $false
 $migrated = $false
+$migrationVerified = $false
 $createdV2 = $false
 $alreadyDcrBased = $false
 $migrationSkippedReason = ""
@@ -191,7 +224,12 @@ $table = Get-Table -TableNameValue $resolvedTableName
 if ($null -eq $table) {
     Create-Table -TableToCreate $resolvedTableName -ColumnsMap $desiredColumns
     $created = $true
-    $table = Get-TableStrict -TableNameValue $resolvedTableName
+    # Freshly created custom tables are DCR-based, but poll to confirm before returning to Deploy-Solution.
+    $table = Wait-ForDcrBasedSubType `
+        -TableNameValue $resolvedTableName `
+        -TimeoutSeconds $MigrationVerificationTimeoutSeconds `
+        -PollSeconds $MigrationVerificationPollSeconds
+    $migrationVerified = $true
 }
 else {
     $tableSubType = $table.schema.tableSubType
@@ -227,15 +265,29 @@ else {
                 throw
             }
         }
+
+        if ($migrated) {
+            # Migration commands return before the schema sub-type has flipped server-side.
+            # Block downstream DCR deployment until the table reports DataCollectionRuleBased,
+            # otherwise DCR writes will be silently dropped.
+            $table = Wait-ForDcrBasedSubType `
+                -TableNameValue $resolvedTableName `
+                -TimeoutSeconds $MigrationVerificationTimeoutSeconds `
+                -PollSeconds $MigrationVerificationPollSeconds
+            $migrationVerified = $true
+        }
     }
     elseif ($AutoMigrateClassic -and $alreadyDcrBased) {
         $migrationSkippedReason = "Table already DataCollectionRuleBased."
+        $migrationVerified = $true
     }
     elseif (-not $AutoMigrateClassic) {
         $migrationSkippedReason = "Auto migration disabled by parameter."
     }
 
-    $table = Get-TableStrict -TableNameValue $resolvedTableName
+    if ($null -eq $table -or -not $migrated) {
+        $table = Get-TableStrict -TableNameValue $resolvedTableName
+    }
 }
 
 $existingColumns = @{}
@@ -268,6 +320,13 @@ if ($typeMismatches.Count -gt 0) {
     Create-Table -TableToCreate $resolvedTableName -ColumnsMap $desiredColumns
     $createdV2 = $true
     $created = $true
+
+    # Verify the newly created v2 table is DCR-based before downstream DCR deploy.
+    $null = Wait-ForDcrBasedSubType `
+        -TableNameValue $resolvedTableName `
+        -TimeoutSeconds $MigrationVerificationTimeoutSeconds `
+        -PollSeconds $MigrationVerificationPollSeconds
+    $migrationVerified = $true
 }
 elseif ($addedColumns.Count -gt 0) {
     foreach ($key in $desiredColumns.Keys) {
@@ -285,6 +344,7 @@ $result = [pscustomobject]@{
     CreatedV2 = $createdV2
     AlreadyDcrBased = $alreadyDcrBased
     MigratedClassic = $migrated
+    MigrationVerified = $migrationVerified
     MigrationSkippedReason = $migrationSkippedReason
     AddedColumns = $addedColumns
     TypeMismatches = $typeMismatches

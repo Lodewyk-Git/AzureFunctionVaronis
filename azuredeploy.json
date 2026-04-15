@@ -31,7 +31,7 @@
     },
     "ownerEmail": {
       "type": "string",
-      "defaultValue": "Lood@buisecops.co.za",
+      "defaultValue": "owner@example.com",
       "metadata": {
         "description": "Owner contact email used for resource tags."
       }
@@ -233,7 +233,7 @@
             },
             "ownerEmail": {
               "type": "string",
-              "defaultValue": "Lood@buisecops.co.za",
+              "defaultValue": "owner@example.com",
               "metadata": {
                 "description": "Owner contact email used for resource tags."
               }
@@ -709,7 +709,7 @@
             },
             "ownerEmail": {
               "type": "string",
-              "defaultValue": "Lood@buisecops.co.za",
+              "defaultValue": "owner@example.com",
               "metadata": {
                 "description": "Owner contact email used for resource tags."
               }

@@ -9,4 +9,7 @@ public sealed class VaronisTokenResponse
 
     [JsonPropertyName("token_type")]
     public string TokenType { get; init; } = string.Empty;
+
+    [JsonPropertyName("expires_in")]
+    public int ExpiresInSeconds { get; init; }
 }

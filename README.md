@@ -134,8 +134,33 @@ VaronisAlerts_CL
 | summarize Records=count(), Latest=max(TimeGenerated)
 ```
 
+## Required RBAC
+
+The deployment scripts assign these roles automatically. They are listed here for auditors, for manual repair after drift, and for operators who need to understand why a failure mode looks the way it does.
+
+| Identity | Role | Scope | Purpose |
+| --- | --- | --- | --- |
+| Function App managed identity | Key Vault Secrets User | Key Vault | Read `VaronisApiKey` at runtime |
+| Function App managed identity | Storage Blob Data Owner | Function storage account | Read/write checkpoint and failure-batch blobs |
+| Function App managed identity | Storage Queue Data Contributor | Function storage account | Functions runtime internal queues |
+| Function App managed identity | Storage Table Data Contributor | Function storage account | Timer trigger lease/state |
+| Function App managed identity | Monitoring Metrics Publisher | Data Collection Rule | Authorized to POST to Logs Ingestion endpoint |
+| GitHub OIDC service principal | Contributor | Resource group | Create/update Function App, storage, KV, DCR/DCE |
+| GitHub OIDC service principal | User Access Administrator | Resource group | Required to create the role assignments above |
+| Operator running Deploy-Solution.ps1 locally | Contributor + User Access Administrator | Resource group | Same reason as CI; interactively granted |
+
 ## Rollback
-Set a known good package and restart the app:
+
+Preferred path (RunFromPackageUrl mode — swaps back to the previously published SAS URL stored in `WEBSITE_RUN_FROM_PACKAGE_PREVIOUS`):
+
+```powershell
+./scripts/Rollback-Package.ps1 `
+  -ResourceGroupName <rg> `
+  -FunctionAppName <app> `
+  -Force
+```
+
+Manual path (only if `WEBSITE_RUN_FROM_PACKAGE_PREVIOUS` is unavailable or the previous deployment used ZipDeploy):
 
 ```powershell
 az functionapp config appsettings set `
@@ -144,6 +169,52 @@ az functionapp config appsettings set `
   --settings "WEBSITE_RUN_FROM_PACKAGE=<known-good-package-url>"
 az functionapp restart --resource-group <rg> --name <app>
 ```
+
+For ZipDeploy rollback, redeploy a prior known-good package via `Deploy-Solution.ps1 -PackagePath <old-zip>` or by re-running the release workflow against an older tag.
+
+## Support handover
+
+### On-call runbook
+
+- **Telemetry entry points**:
+  - App Insights: filter by `AppRoleName startswith "<prefix>-<env>-varonis-func"` on `AppTraces` and `AppExceptions`.
+  - Function host status: `https://<app>.azurewebsites.net/admin/host/status` (x-functions-key header = master key).
+  - Liveness probe: `https://<app>.azurewebsites.net/api/health` — anonymous, returns 200 with version/config summary.
+- **Ingestion health (KQL)**:
+  ```kql
+  VaronisAlerts_CL
+  | where TimeGenerated > ago(1h)
+  | summarize Records = count(), Latest = max(TimeGenerated), Actors = dcount(Actor)
+  ```
+- **Run the full health probe** without Azure portal:
+  ```powershell
+  ./scripts/Test-FunctionAppHealth.ps1 `
+    -ResourceGroupName <rg> `
+    -FunctionAppName <app>
+  ```
+- **Alerts** (deployed by `infra/modules/alerts.bicep`):
+  - `<prefix>-<env>-func-failures` — metric alert on `FunctionExecutionCount` with `Status=Failed`.
+  - `<prefix>-<env>-no-ingestion` — scheduled query alert when the destination table has no rows in the evaluation window.
+  - `<prefix>-<env>-dcr-errors` — scheduled query alert on `DCRLogErrors`.
+  - Wire an Action Group by re-running the deploy with `-AlertActionGroupResourceId <id>`.
+
+### Secret rotation (Varonis API key)
+
+1. Retrieve the new key from Varonis.
+2. `az keyvault secret set --vault-name <kv> --name VaronisApiKey --value <new-key>`.
+3. No app restart required — the Function reads the KV reference on next invocation and the in-memory cache expires within 15 minutes. To force immediate pickup, restart the Function App.
+
+### Common failure modes
+
+| Symptom | Likely cause | First check |
+| --- | --- | --- |
+| Function runs, zero rows land | `Monitoring Metrics Publisher` role missing on DCR | `az role assignment list --assignee <principalId> --scope <dcrResourceId>` |
+| `AuthorizationFailed` immediately after deploy | MI propagation delay | Retry after 2–5 minutes |
+| 413 Payload Too Large on ingestion | `RawRecord` pushing batch over 1 MB | Lower `Ingestion__MaxPayloadBytes` app setting |
+| Rows not appearing despite healthy DCR | Stream name mismatch | Compare `Ingestion__StreamName` with the DCR's `streamDeclarations` key |
+| App starts then idles, no invocations | `WEBSITE_RUN_FROM_PACKAGE` URL returns 404 | Test the URL with `curl -I`; check SAS expiry |
+| Timer never fires | `TimerSchedule` missing or malformed NCRONTAB | `az functionapp config appsettings list` |
+| Table exists but appears empty after deploy | Legacy classic table still in `Classic` sub-type | Check `Invoke-TableLifecycle.ps1` output; `MigrationVerified` must be `true` |
 
 ## CI/CD
 Workflow: [.github/workflows/ci-cd.yml](.github/workflows/ci-cd.yml)

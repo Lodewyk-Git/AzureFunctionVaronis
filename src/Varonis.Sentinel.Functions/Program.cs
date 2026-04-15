@@ -15,6 +15,11 @@ var host = new HostBuilder()
     {
         var configuration = context.Configuration;
 
+        // Route worker ILogger output to Application Insights.
+        // Connection string is supplied via APPLICATIONINSIGHTS_CONNECTION_STRING app setting (see infra/modules/core.bicep).
+        services.AddApplicationInsightsTelemetryWorkerService();
+        services.ConfigureFunctionsApplicationInsights();
+
         services
             .AddOptions<VaronisOptions>()
             .Bind(configuration.GetSection("Varonis"))
@@ -90,6 +95,7 @@ var host = new HostBuilder()
         });
 
         services.AddSingleton<ISecretProvider, SecretProvider>();
+        services.AddSingleton<IVaronisTokenCache, VaronisTokenCache>();
         services.AddSingleton<ICheckpointService, CheckpointService>();
         services.AddSingleton<IFailureStoreService, FailureStoreService>();
         services.AddSingleton<ILogIngestionService, LogIngestionService>();

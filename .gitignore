@@ -14,6 +14,24 @@ functionapp/packages/*.zip
 functionapp/packages/*.sha256
 .artifacts/
 
+# Never commit build zips at repo root (GitHub Releases hosts stable-named assets).
+/AzureFunctionVaronis.zip
+/varonis-sentinel-functions*.zip
+/*.zip
+
+# Ad-hoc scripts must live under /scripts. The only deployment entry point allowed at
+# repo root is deploy.ps1. Anything else at root (PowerShell, bash, Python, JS) is
+# treated as a scratch/local-only artifact and excluded from commits.
+/*.ps1
+!/deploy.ps1
+/*.sh
+/*.bash
+/*.py
+/*.js
+/*.mjs
+/*.cjs
+/*.ts
+
 # Generated IaC build output
 infra/main.json
 infra/modules/*.json
