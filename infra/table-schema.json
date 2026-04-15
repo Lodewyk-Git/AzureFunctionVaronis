@@ -2,7 +2,7 @@
   "tableName": "VaronisAlerts_CL",
   "description": "Varonis threat alerts ingested via Azure Monitor Logs Ingestion API.",
   "plan": "Analytics",
-  "retentionInDays": 30,
+  "retentionInDays": 90,
   "totalRetentionInDays": 90,
   "columns": [
     { "name": "TimeGenerated", "type": "datetime" },

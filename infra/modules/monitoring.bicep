@@ -81,7 +81,7 @@ param tableColumns array = [
 ]
 
 @description('Table retention in days.')
-param tableRetentionInDays int = 30
+param tableRetentionInDays int = 90
 
 @description('Table total retention in days.')
 param tableTotalRetentionInDays int = 90

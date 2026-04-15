@@ -139,7 +139,7 @@ function Create-Table {
 
     $columnArgs = New-ColumnArguments -Columns $ColumnsMap
     $planValue = if ([string]::IsNullOrWhiteSpace($schema.plan)) { "Analytics" } else { $schema.plan }
-    $retentionValue = if ($null -eq $schema.retentionInDays) { 30 } else { [int]$schema.retentionInDays }
+    $retentionValue = if ($null -eq $schema.retentionInDays) { 90 } else { [int]$schema.retentionInDays }
     $totalRetentionValue = if ($null -eq $schema.totalRetentionInDays) { 90 } else { [int]$schema.totalRetentionInDays }
 
     $args = @(

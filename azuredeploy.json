@@ -802,9 +802,9 @@
             },
             "tableRetentionInDays": {
               "type": "int",
-              "defaultValue": 30,
+              "defaultValue": 90,
               "metadata": {
-                "description": "Table retention in days."
+                "description": "Table Analytics-tier retention in days. Defaults to match totalRetention so the table is fully Analytics-priced (no Basic-tier long-term portion)."
               }
             },
             "tableTotalRetentionInDays": {
