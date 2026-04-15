@@ -24,19 +24,58 @@ public static class VaronisAlertMapper
             }
 
             var alertTime = ParseDateTimeOffset(
-                GetFirstValue(raw, "alertTimeUtc", "timestamp", "createdAt", "eventTime", "timeGenerated")) ?? DateTimeOffset.UtcNow;
+                GetFirstValue(
+                    raw,
+                    "alertTimeUtc",
+                    "timestamp",
+                    "createdAt",
+                    "eventTime",
+                    "timeGenerated",
+                    "Alert.TimeUTC",
+                    "Alert.Initial.Event.TimeUTC",
+                    "Alert.Time",
+                    "Alert.Initial.Event.TimeLocal")) ?? DateTimeOffset.UtcNow;
 
             yield return new VaronisAlert
             {
                 TimeGenerated = alertTime,
-                AlertId = GetFirstValue(raw, "alertId", "id", "eventId") ?? GenerateDeterministicId(raw),
+                AlertId = GetFirstValue(raw, "alertId", "id", "eventId", "Alert.ID") ?? GenerateDeterministicId(raw),
                 AlertTimeUtc = alertTime,
-                Severity = GetFirstValue(raw, "severity") ?? string.Empty,
-                Status = GetFirstValue(raw, "status") ?? string.Empty,
-                ThreatDetectionPolicy = GetFirstValue(raw, "threatDetectionPolicy", "threatPolicy", "policyName") ?? string.Empty,
-                Description = GetFirstValue(raw, "description", "message", "title", "name") ?? string.Empty,
-                Actor = GetFirstValue(raw, "actor", "user", "username", "principal") ?? string.Empty,
-                Asset = GetFirstValue(raw, "asset", "resource", "device", "host", "target") ?? string.Empty,
+                Severity = GetFirstValue(raw, "severity", "Alert.Rule.Severity.Name") ?? string.Empty,
+                Status = GetFirstValue(raw, "status", "Alert.Status.Name") ?? string.Empty,
+                ThreatDetectionPolicy = GetFirstValue(
+                    raw,
+                    "threatDetectionPolicy",
+                    "threatPolicy",
+                    "policyName",
+                    "Alert.Rule.Name",
+                    "Alert.Rule.Category.Name") ?? string.Empty,
+                Description = GetFirstValue(
+                    raw,
+                    "description",
+                    "message",
+                    "title",
+                    "name",
+                    "Alert.Rule.Name",
+                    "Alert.ActionType.Name") ?? string.Empty,
+                Actor = GetFirstValue(
+                    raw,
+                    "actor",
+                    "user",
+                    "username",
+                    "principal",
+                    "Alert.User.Name",
+                    "Alert.User.SamAccountName") ?? string.Empty,
+                Asset = GetFirstValue(
+                    raw,
+                    "asset",
+                    "resource",
+                    "device",
+                    "host",
+                    "target",
+                    "Alert.Asset.Path",
+                    "Alert.Device.HostName",
+                    "Alert.Filer.Name") ?? string.Empty,
                 RawRecord = raw,
                 IngestedAtUtc = DateTimeOffset.UtcNow,
                 CorrelationId = correlationId
