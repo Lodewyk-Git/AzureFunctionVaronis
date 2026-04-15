@@ -34,6 +34,13 @@ var host = new HostBuilder()
         services
             .AddOptions<VaronisOptions>()
             .Bind(configuration.GetSection("Varonis"))
+            .PostConfigure(options =>
+            {
+                if (string.IsNullOrWhiteSpace(options.BaseUrl))
+                {
+                    options.BaseUrl = VaronisOptions.DefaultBaseUrl;
+                }
+            })
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
