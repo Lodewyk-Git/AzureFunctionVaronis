@@ -108,9 +108,22 @@ Important: deployment targets an existing Sentinel-enabled workspace and does no
 - Previous package metadata is retained in app settings during publish.
 
 ### GitHub Release Integration
-- `release-package.yml` publishes `varonis-sentinel-functions.zip`.
+- `release-package.yml` publishes `varonis-sentinel-functions.zip` plus a version-stamped zip (`varonis-sentinel-functions-<version>.zip`) to the GitHub Release for the pushed tag.
 - IaC default for `WEBSITE_RUN_FROM_PACKAGE` points to:
   - `https://github.com/Lodewyk-Git/AzureFunctionVaronis/releases/latest/download/varonis-sentinel-functions.zip`
+
+### Prefer an immutable package URL in production
+The `releases/latest/download/...` URL is convenient for dev/test but is mutable: the next release will retarget the same URL and the next Function App cold-start will pull the new package silently. For production environments, prefer one of:
+
+1. **Versioned GitHub release asset** — pin to a specific tag:
+   ```text
+   https://github.com/Lodewyk-Git/AzureFunctionVaronis/releases/download/v1.1.4/varonis-sentinel-functions-20260415091456-3c344de.zip
+   ```
+   Rotate explicitly via Deploy-Solution.ps1 or a pipeline step when you want to take a new version.
+2. **Private blob with SAS** — run `Publish-Package.ps1 -DeploymentMode RunFromPackageUrl`; it uploads the zip to `packageStorage`, generates a 30-day SAS, and rotates `WEBSITE_RUN_FROM_PACKAGE` accordingly. `WEBSITE_RUN_FROM_PACKAGE_PREVIOUS` is preserved for one-command rollback via `Rollback-Package.ps1`.
+
+### Package integrity check
+Every `Build-Package.ps1` run inspects the produced zip and fails fast if the `.azurefunctions` metadata folder is missing at zip root — that folder is produced by the Functions Worker SDK at publish time, and without it the host logs `0 functions found (Custom)` and the portal shows no functions.
 
 ## Validation
 Run deployment validation:

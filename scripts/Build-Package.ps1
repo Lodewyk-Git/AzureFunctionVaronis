@@ -55,7 +55,36 @@ if (Test-Path -LiteralPath $zipFilePath) {
     Remove-Item -LiteralPath $zipFilePath -Force
 }
 
-Compress-Archive -Path (Join-Path $publishPath "*") -DestinationPath $zipFilePath -CompressionLevel Optimal
+# Do NOT use Compress-Archive here: with -Path "folder/*" it silently skips
+# dot-prefixed entries like `.azurefunctions`, which the Functions host requires
+# to index functions. Without that folder the host logs "0 functions found (Custom)".
+# ZipFile.CreateFromDirectory zips every entry under the source directory at
+# zip root (no wrapper folder), matching the WEBSITE_RUN_FROM_PACKAGE layout.
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+[System.IO.Compression.ZipFile]::CreateFromDirectory(
+    $publishPath,
+    $zipFilePath,
+    [System.IO.Compression.CompressionLevel]::Optimal,
+    $false)
+
+$azureFunctionsEntryFound = $false
+$zipToInspect = [System.IO.Compression.ZipFile]::OpenRead($zipFilePath)
+try {
+    foreach ($entry in $zipToInspect.Entries) {
+        if ($entry.FullName.StartsWith('.azurefunctions/', [StringComparison]::OrdinalIgnoreCase) -or
+            $entry.FullName.Equals('.azurefunctions', [StringComparison]::OrdinalIgnoreCase)) {
+            $azureFunctionsEntryFound = $true
+            break
+        }
+    }
+}
+finally {
+    $zipToInspect.Dispose()
+}
+
+if (-not $azureFunctionsEntryFound) {
+    throw "Package at $zipFilePath is missing the '.azurefunctions' folder at zip root. The Functions host will report '0 functions found' without it."
+}
 
 $hash = Get-FileHash -Path $zipFilePath -Algorithm SHA256
 $hashFilePath = "$zipFilePath.sha256"
