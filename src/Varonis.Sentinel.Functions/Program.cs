@@ -10,12 +10,14 @@ using Varonis.Sentinel.Functions.Options;
 using Varonis.Sentinel.Functions.Services;
 
 var host = new HostBuilder()
-    .ConfigureFunctionsWorkerDefaults(builder =>
+    // Two-arg overload targets IFunctionsWorkerApplicationBuilder (the single-arg overload binds WorkerOptions,
+    // which does not expose the AI extensions we need).
+    .ConfigureFunctionsWorkerDefaults((hostContext, workerAppBuilder) =>
     {
         // Route worker telemetry + ILogger output to Application Insights.
         // Connection string is supplied via APPLICATIONINSIGHTS_CONNECTION_STRING app setting (see infra/modules/core.bicep).
-        builder.AddApplicationInsights();
-        builder.AddApplicationInsightsLogger();
+        workerAppBuilder.AddApplicationInsights();
+        workerAppBuilder.AddApplicationInsightsLogger();
     })
     .ConfigureServices((context, services) =>
     {
