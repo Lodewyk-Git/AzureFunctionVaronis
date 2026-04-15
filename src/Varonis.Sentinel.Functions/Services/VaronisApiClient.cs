@@ -650,6 +650,19 @@ public sealed class VaronisApiClient : IVaronisApiClient
             return requestMessage;
         }, cancellationToken);
 
+        // Varonis returns 304 Not Modified on the rows endpoint when the async search completed
+        // with zero matching rows for the supplied window. Treat as empty success — the timer
+        // function will then advance the checkpoint normally instead of failing the run.
+        if (response.StatusCode == HttpStatusCode.NotModified ||
+            response.StatusCode == HttpStatusCode.NoContent)
+        {
+            _logger.LogInformation(
+                "Varonis pagination GET returned {StatusCode}; treating as empty result. SearchUrl={SearchUrl}",
+                (int)response.StatusCode,
+                searchUrl);
+            return new VaronisSearchResponse();
+        }
+
         if (!response.IsSuccessStatusCode)
         {
             var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
