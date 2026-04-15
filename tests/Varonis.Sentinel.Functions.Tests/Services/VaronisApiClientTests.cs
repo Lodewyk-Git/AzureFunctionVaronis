@@ -11,6 +11,7 @@ public class VaronisApiClientTests
     {
         var httpClient = new HttpClient { BaseAddress = new Uri(baseUrl) };
         var secretProvider = new Mock<ISecretProvider>();
+        var tokenCache = new VaronisTokenCache();
         var logger = new Mock<ILogger<VaronisApiClient>>();
         var options = Microsoft.Extensions.Options.Options.Create(new VaronisOptions
         {
@@ -18,7 +19,7 @@ public class VaronisApiClientTests
             RetryCount = 0
         });
 
-        return new VaronisApiClient(httpClient, secretProvider.Object, options, logger.Object);
+        return new VaronisApiClient(httpClient, secretProvider.Object, tokenCache, options, logger.Object);
     }
 
     [Fact]
