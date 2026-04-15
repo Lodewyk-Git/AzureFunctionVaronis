@@ -141,7 +141,20 @@ public sealed class VaronisApiClient : IVaronisApiClient
                 return request;
             }, cancellationToken);
 
-            response.EnsureSuccessStatusCode();
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+                _logger.LogError(
+                    "Varonis token endpoint returned non-success {StatusCode}. AuthPath={AuthPath}, ResponseBody={ResponseBody}",
+                    (int)response.StatusCode,
+                    _options.AuthPath,
+                    Truncate(errorBody, ErrorBodyLogLimit));
+                throw new HttpRequestException(
+                    $"Varonis token endpoint returned {(int)response.StatusCode} ({response.StatusCode}). ResponseBody={Truncate(errorBody, ErrorBodyLogLimit)}",
+                    inner: null,
+                    statusCode: response.StatusCode);
+            }
+
             var tokenResponse = await response.Content.ReadFromJsonAsync<VaronisTokenResponse>(JsonDefaults.SerializerOptions, cancellationToken);
 
             if (tokenResponse is null || string.IsNullOrWhiteSpace(tokenResponse.AccessToken))
@@ -199,6 +212,11 @@ public sealed class VaronisApiClient : IVaronisApiClient
         var legacyErrorBody = await legacyResponse.Content.ReadAsStringAsync(cancellationToken);
         if (legacyResponse.StatusCode != HttpStatusCode.BadRequest)
         {
+            _logger.LogError(
+                "Varonis search returned non-success {StatusCode} using legacy payload. SearchPath={SearchPath}, ResponseBody={ResponseBody}",
+                (int)legacyResponse.StatusCode,
+                _options.SearchPath,
+                Truncate(legacyErrorBody, ErrorBodyLogLimit));
             throw CreateSearchRequestException(legacyResponse.StatusCode, legacyErrorBody, "legacy");
         }
 
@@ -217,6 +235,11 @@ public sealed class VaronisApiClient : IVaronisApiClient
         if (!modernResponse.IsSuccessStatusCode)
         {
             var modernErrorBody = await modernResponse.Content.ReadAsStringAsync(cancellationToken);
+            _logger.LogError(
+                "Varonis search returned non-success {StatusCode} using modern payload (after legacy 400). SearchPath={SearchPath}, ResponseBody={ResponseBody}",
+                (int)modernResponse.StatusCode,
+                _options.SearchPath,
+                Truncate(modernErrorBody, ErrorBodyLogLimit));
             throw CreateSearchRequestException(modernResponse.StatusCode, modernErrorBody, "modern");
         }
 
@@ -666,6 +689,11 @@ public sealed class VaronisApiClient : IVaronisApiClient
         if (!response.IsSuccessStatusCode)
         {
             var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            _logger.LogError(
+                "Varonis pagination GET returned non-success {StatusCode}. SearchUrl={SearchUrl}, ResponseBody={ResponseBody}",
+                (int)response.StatusCode,
+                searchUrl,
+                Truncate(errorBody, ErrorBodyLogLimit));
             throw CreateSearchRequestException(response.StatusCode, errorBody, "pagination");
         }
 
@@ -688,12 +716,25 @@ public sealed class VaronisApiClient : IVaronisApiClient
                 if (TransientStatusCodes.Contains(response.StatusCode) && attempt < maxAttempts)
                 {
                     var delay = GetDelay(attempt);
+                    // Read body before disposing so we can include it in the warn log; transient
+                    // bodies (rate-limit JSON, gateway HTML) are usually small.
+                    var transientBody = string.Empty;
+                    try
+                    {
+                        transientBody = await response.Content.ReadAsStringAsync(cancellationToken);
+                    }
+                    catch
+                    {
+                        // best-effort; never fail a retry on logging
+                    }
+
                     _logger.LogWarning(
-                        "Transient Varonis API response ({StatusCode}) on attempt {Attempt}/{MaxAttempts}; retrying in {Delay}.",
+                        "Transient Varonis API response ({StatusCode}) on attempt {Attempt}/{MaxAttempts}; retrying in {Delay}. ResponseBody={ResponseBody}",
                         (int)response.StatusCode,
                         attempt,
                         maxAttempts,
-                        delay);
+                        delay,
+                        Truncate(transientBody, ErrorBodyLogLimit));
 
                     response.Dispose();
                     await Task.Delay(delay, cancellationToken);
