@@ -46,37 +46,12 @@ var host = new HostBuilder()
         services
             .AddOptions<VaronisOptions>()
             .Bind(configuration.GetSection("Varonis"))
-            .PostConfigure(options =>
-            {
-                if (string.IsNullOrWhiteSpace(options.BaseUrl))
-                {
-                    options.BaseUrl = VaronisOptions.DefaultBaseUrl;
-                }
-            })
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
         services
             .AddOptions<IngestionOptions>()
             .Bind(configuration.GetSection("Ingestion"))
-            .PostConfigure(options =>
-            {
-                // Transitional: substitute obfuscated built-in defaults when app settings are
-                // unset, so a Function App can start before its Ingestion__* settings land.
-                // Remove once every environment explicitly sets its own values.
-                if (string.IsNullOrWhiteSpace(options.Endpoint))
-                {
-                    options.Endpoint = IngestionOptions.DefaultEndpoint;
-                }
-                if (string.IsNullOrWhiteSpace(options.DcrImmutableId))
-                {
-                    options.DcrImmutableId = IngestionOptions.DefaultDcrImmutableId;
-                }
-                if (string.IsNullOrWhiteSpace(options.StreamName))
-                {
-                    options.StreamName = IngestionOptions.DefaultStreamName;
-                }
-            })
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
